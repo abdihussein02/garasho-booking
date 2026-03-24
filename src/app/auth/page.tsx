@@ -47,7 +47,7 @@ export default function AuthPage() {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg shadow-slate-200">
         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-500">
-          Garahso Booking
+          GARASHO Booking
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
           {mode === "login" ? "Welcome back" : "Create your agency account"}

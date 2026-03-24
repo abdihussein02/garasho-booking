@@ -165,8 +165,8 @@ export default function DashboardPage() {
     <main className="flex min-h-screen bg-slate-50">
       <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white/80 p-6 backdrop-blur sm:flex">
         <div className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-500">
-            Garahso
+          <p className="text-sm font-extrabold uppercase tracking-[0.22em] text-sky-600">
+            GARASHO
           </p>
           <p className="mt-1 text-sm font-semibold text-slate-900">
             Agency Dashboard

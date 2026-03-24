@@ -5,7 +5,7 @@ export default function Home() {
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="mx-auto w-full max-w-xl rounded-2xl bg-white p-10 shadow-lg shadow-slate-200">
         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-500">
-          Garahso Booking
+          GARASHO Booking
         </p>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
           Travel agency booking platform

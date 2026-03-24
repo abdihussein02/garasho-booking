@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Garahso Booking Dashboard",
+  title: "Garasho Booking Dashboard",
   description: "Travel agency booking management",
 };
 
