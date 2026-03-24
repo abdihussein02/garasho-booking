@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import jsPDF from "jspdf";
@@ -85,6 +85,28 @@ function TimeInput({
   required?: boolean;
   placeholder?: string;
 }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <input
+        id={id}
+        type="text"
+        inputMode="text"
+        autoComplete="off"
+        required={required}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+      />
+    );
+  }
+
   return (
     <>
       <input
@@ -116,6 +138,13 @@ type Layover = {
   arrival_time: string;
 };
 
+type BankingAccount = {
+  id: string;
+  name: string;
+  type: string;
+  balance: number | null;
+};
+
 function createEmptyLayover(): Layover {
   return {
     id: crypto.randomUUID(),
@@ -138,12 +167,36 @@ export default function NewBookingPage() {
   const [includePrice, setIncludePrice] = useState(true);
   const [netCost, setNetCost] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
-  const [layovers, setLayovers] = useState<Layover[]>([createEmptyLayover()]);
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [depositAccountId, setDepositAccountId] = useState("");
+  const [bankingAccounts, setBankingAccounts] = useState<BankingAccount[]>([]);
+  const [layovers, setLayovers] = useState<Layover[]>([]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const router = useRouter();
+
+  useEffect(() => {
+    setLayovers([createEmptyLayover()]);
+  }, []);
+
+  useEffect(() => {
+    async function loadAccounts() {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data, error } = await supabase
+          .from("banking_accounts")
+          .select("id, name, type, balance")
+          .order("name", { ascending: true });
+        if (error) return;
+        setBankingAccounts((data as BankingAccount[]) ?? []);
+      } catch {
+        setBankingAccounts([]);
+      }
+    }
+    loadAccounts();
+  }, []);
 
   function addLayoverRow() {
     setLayovers((prev) => [...prev, createEmptyLayover()]);
@@ -187,32 +240,64 @@ export default function NewBookingPage() {
       }
 
       // Try inserting with the newer flight info fields first.
+      const bookingPayload = {
+        traveler_name: travelerName,
+        departure_city: departureCity,
+        destination_city: destinationCity,
+        departure_time: dep24,
+        arrival_time: arr24,
+        net_cost: parsedNetCost,
+        selling_price: parsedSellingPrice,
+        airline_name: airlineName,
+        flight_number: flightNumber,
+        travel_date: travelDate,
+        include_price: includePrice,
+        payment_method: paymentMethod,
+        deposit_account_id: depositAccountId || null,
+        notes,
+      };
+
       const insertPrimary = await supabase
         .from("bookings")
-        .insert({
-          traveler_name: travelerName,
-          departure_city: departureCity,
-          destination_city: destinationCity,
-          travel_date: travelDate,
-          departure_time: dep24,
-          arrival_time: arr24,
-          airline_name: airlineName,
-          flight_number: flightNumber,
-          include_price: includePrice,
-          net_cost: parsedNetCost,
-          selling_price: parsedSellingPrice,
-          total_price: parsedSellingPrice,
-          notes,
-        })
+        .insert(bookingPayload)
         .select("id")
         .single();
 
       let booking = insertPrimary.data;
       let error = insertPrimary.error;
 
-      // Fallback for older schemas (keeps app usable if columns differ).
+      // Fallback chain: preserve as much user data as possible across schema versions.
       if (error) {
-        const fallback = await supabase
+        const fallbackExtended = await supabase
+          .from("bookings")
+          .insert({
+            traveler_name: travelerName,
+            destination: destinationCity,
+            departure_date: travelDate,
+            return_date: null,
+            notes,
+            departure_city: departureCity,
+            destination_city: destinationCity,
+            travel_date: travelDate,
+            departure_time: dep24,
+            arrival_time: arr24,
+            airline_name: airlineName,
+            flight_number: flightNumber,
+            net_cost: parsedNetCost,
+            selling_price: parsedSellingPrice,
+            include_price: includePrice,
+            payment_method: paymentMethod,
+            deposit_account_id: depositAccountId || null,
+          })
+          .select("id")
+          .single();
+
+        booking = fallbackExtended.data;
+        error = fallbackExtended.error;
+      }
+
+      if (error) {
+        const fallbackMinimal = await supabase
           .from("bookings")
           .insert({
             traveler_name: travelerName,
@@ -224,11 +309,22 @@ export default function NewBookingPage() {
           .select("id")
           .single();
 
-        booking = fallback.data;
-        error = fallback.error;
+        booking = fallbackMinimal.data;
+        error = fallbackMinimal.error;
       }
 
       if (error) throw error;
+
+      if (depositAccountId && parsedSellingPrice !== null) {
+        const { error: incrementError } = await supabase.rpc(
+          "increment_bank_account_balance",
+          {
+            p_account_id: depositAccountId,
+            p_amount: parsedSellingPrice,
+          }
+        );
+        if (incrementError) throw incrementError;
+      }
 
       const filteredLayovers = layovers.filter(
         (l) =>
@@ -258,11 +354,15 @@ export default function NewBookingPage() {
 
       router.push("/dashboard");
     } catch (error) {
-      console.error(error);
-      const message =
-        error instanceof Error && error.message
+      const rawMessage =
+        error instanceof Error
           ? error.message
-          : "Something went wrong while saving. Please try again.";
+          : typeof error === "object" &&
+              error !== null &&
+              "message" in error
+            ? String((error as { message?: unknown }).message ?? "")
+            : "";
+      const message = rawMessage.trim() || "Something went wrong while saving. Please try again.";
       setSubmitError(message);
     } finally {
       setSaving(false);
@@ -530,6 +630,43 @@ export default function NewBookingPage() {
                       placeholder="e.g. 1250"
                       className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
                     />
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">
+                      Payment method
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                    >
+                      <option value="Cash">Cash</option>
+                      <option value="EVC">EVC</option>
+                      <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Visa/Mastercard">Visa/Mastercard</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">
+                      Deposit to
+                    </label>
+                    <select
+                      value={depositAccountId}
+                      onChange={(e) => setDepositAccountId(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                    >
+                      <option value="">No account selected</option>
+                      {bankingAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name} ({account.type})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Booking saves even if no account is selected.
+                    </p>
                   </div>
                 </div>
               </div>

@@ -20,6 +20,31 @@ type Booking = {
   selling_price: number | null;
 };
 
+type LegacyItineraryRow = {
+  id: string;
+  traveler_name: string | null;
+  destination: string | null;
+  departure_date: string | null;
+  notes: string | null;
+};
+
+function mapLegacyItinerary(row: LegacyItineraryRow): Booking {
+  return {
+    id: row.id,
+    traveler_name: row.traveler_name,
+    airline_name: null,
+    flight_number: null,
+    departure_city: null,
+    destination_city: row.destination,
+    travel_date: row.departure_date,
+    departure_time: null,
+    arrival_time: null,
+    notes: row.notes,
+    include_price: false,
+    selling_price: null,
+  };
+}
+
 export default function ItineraryPage() {
   const params = useParams<{ id: string }>();
   const [booking, setBooking] = useState<Booking | null>(null);
@@ -29,14 +54,31 @@ export default function ItineraryPage() {
     async function load() {
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data } = await supabase
+        const primary = await supabase
           .from("bookings")
           .select(
             "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price"
           )
           .eq("id", params.id)
           .single();
-        setBooking((data as Booking) ?? null);
+
+        if (!primary.error && primary.data) {
+          setBooking(primary.data as Booking);
+          return;
+        }
+
+        const legacy = await supabase
+          .from("bookings")
+          .select("id, traveler_name, destination, departure_date, notes")
+          .eq("id", params.id)
+          .single();
+
+        if (!legacy.error && legacy.data) {
+          setBooking(mapLegacyItinerary(legacy.data as LegacyItineraryRow));
+          return;
+        }
+
+        setBooking(null);
       } finally {
         setLoading(false);
       }

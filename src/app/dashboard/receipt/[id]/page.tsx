@@ -11,6 +11,17 @@ type ReceiptBooking = {
   selling_price: number | null;
 };
 
+type LegacyReceiptWithTotal = {
+  id: string;
+  traveler_name: string | null;
+  total_price: number | null;
+};
+
+type LegacyReceiptMinimal = {
+  id: string;
+  traveler_name: string | null;
+};
+
 export default function ReceiptPage() {
   const params = useParams<{ id: string }>();
   const [booking, setBooking] = useState<ReceiptBooking | null>(null);
@@ -20,12 +31,50 @@ export default function ReceiptPage() {
     async function load() {
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data } = await supabase
+        const primary = await supabase
           .from("bookings")
           .select("id, traveler_name, selling_price")
           .eq("id", params.id)
           .single();
-        setBooking((data as ReceiptBooking) ?? null);
+
+        if (!primary.error && primary.data) {
+          setBooking(primary.data as ReceiptBooking);
+          return;
+        }
+
+        const withTotal = await supabase
+          .from("bookings")
+          .select("id, traveler_name, total_price")
+          .eq("id", params.id)
+          .single();
+
+        if (!withTotal.error && withTotal.data) {
+          const row = withTotal.data as LegacyReceiptWithTotal;
+          setBooking({
+            id: row.id,
+            traveler_name: row.traveler_name,
+            selling_price: row.total_price,
+          });
+          return;
+        }
+
+        const minimal = await supabase
+          .from("bookings")
+          .select("id, traveler_name")
+          .eq("id", params.id)
+          .single();
+
+        if (!minimal.error && minimal.data) {
+          const row = minimal.data as LegacyReceiptMinimal;
+          setBooking({
+            id: row.id,
+            traveler_name: row.traveler_name,
+            selling_price: null,
+          });
+          return;
+        }
+
+        setBooking(null);
       } finally {
         setLoading(false);
       }
