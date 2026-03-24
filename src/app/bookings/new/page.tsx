@@ -128,12 +128,16 @@ function createEmptyLayover(): Layover {
 
 export default function NewBookingPage() {
   const [travelerName, setTravelerName] = useState("");
+  const [airlineName, setAirlineName] = useState("");
+  const [flightNumber, setFlightNumber] = useState("");
   const [departureCity, setDepartureCity] = useState("");
   const [destinationCity, setDestinationCity] = useState("");
   const [travelDate, setTravelDate] = useState("");
   const [departureTime, setDepartureTime] = useState("");
   const [arrivalTime, setArrivalTime] = useState("");
-  const [totalPrice, setTotalPrice] = useState("");
+  const [includePrice, setIncludePrice] = useState(true);
+  const [netCost, setNetCost] = useState("");
+  const [sellingPrice, setSellingPrice] = useState("");
   const [layovers, setLayovers] = useState<Layover[]>([createEmptyLayover()]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -169,11 +173,17 @@ export default function NewBookingPage() {
         throw new Error("Please enter valid departure and arrival times (e.g. 9:30 AM).");
       }
 
-      const parsedTotalPrice = totalPrice.trim()
-        ? Number(totalPrice.replace(/[^0-9.]/g, ""))
+      const parsedNetCost = netCost.trim()
+        ? Number(netCost.replace(/[^0-9.]/g, ""))
         : null;
-      if (parsedTotalPrice !== null && Number.isNaN(parsedTotalPrice)) {
-        throw new Error("Total price must be a number.");
+      const parsedSellingPrice = sellingPrice.trim()
+        ? Number(sellingPrice.replace(/[^0-9.]/g, ""))
+        : null;
+      if (parsedNetCost !== null && Number.isNaN(parsedNetCost)) {
+        throw new Error("Net cost must be a number.");
+      }
+      if (parsedSellingPrice !== null && Number.isNaN(parsedSellingPrice)) {
+        throw new Error("Selling price must be a number.");
       }
 
       // Try inserting with the newer flight info fields first.
@@ -186,7 +196,12 @@ export default function NewBookingPage() {
           travel_date: travelDate,
           departure_time: dep24,
           arrival_time: arr24,
-          total_price: parsedTotalPrice,
+          airline_name: airlineName,
+          flight_number: flightNumber,
+          include_price: includePrice,
+          net_cost: parsedNetCost,
+          selling_price: parsedSellingPrice,
+          total_price: parsedSellingPrice,
           notes,
         })
         .select("id")
@@ -289,7 +304,11 @@ export default function NewBookingPage() {
     addLine("Travel date", travelDate);
     addLine("Depart", formatTimeTo12h(parseTimeTo24h(departureTime) ?? departureTime));
     addLine("Arrive", formatTimeTo12h(parseTimeTo24h(arrivalTime) ?? arrivalTime));
-    addLine("Total price", totalPrice);
+    addLine("Airline", airlineName);
+    addLine("Flight no.", flightNumber);
+    if (includePrice) {
+      addLine("Price", sellingPrice);
+    }
 
     if (notes) {
       y += 4;
@@ -370,14 +389,13 @@ export default function NewBookingPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                Total price
+                Airline name
               </label>
               <input
                 type="text"
-                inputMode="decimal"
-                value={totalPrice}
-                onChange={(e) => setTotalPrice(e.target.value)}
-                placeholder="e.g. 1250 or $1,250"
+                value={airlineName}
+                onChange={(e) => setAirlineName(e.target.value)}
+                placeholder="e.g. Turkish Airlines"
                 className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
               />
             </div>
@@ -412,6 +430,18 @@ export default function NewBookingPage() {
                   required
                   value={destinationCity}
                   onChange={(e) => setDestinationCity(e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Flight number
+                </label>
+                <input
+                  type="text"
+                  value={flightNumber}
+                  onChange={(e) => setFlightNumber(e.target.value)}
+                  placeholder="e.g. TK647"
                   className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
                 />
               </div>
@@ -461,6 +491,46 @@ export default function NewBookingPage() {
                   <p className="mt-1 text-[11px] text-slate-500">
                     12-hour AM/PM format.
                   </p>
+                </div>
+              </div>
+
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={includePrice}
+                    onChange={(e) => setIncludePrice(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  Include price on itinerary?
+                </label>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">
+                      Net cost (your cost)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={netCost}
+                      onChange={(e) => setNetCost(e.target.value)}
+                      placeholder="e.g. 900"
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">
+                      Selling price (customer price)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={sellingPrice}
+                      onChange={(e) => setSellingPrice(e.target.value)}
+                      placeholder="e.g. 1250"
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
