@@ -78,22 +78,47 @@ export default function AccountsPage() {
     }
   }
 
+  const totalLiquidAssets = accounts.reduce((sum, account) => sum + (account.balance || 0), 0);
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-8">
-      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <div className="mb-6 flex items-start justify-between border-b border-slate-100 pb-4">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 to-slate-800 p-6 text-white shadow-xl shadow-slate-300/40 sm:p-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300">
+                Treasury Command
+              </p>
+              <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+                Agency Banking Portal
+              </h1>
+              <p className="mt-2 text-sm text-slate-200">
+                Manage all payment rails and operating cash with enterprise visibility.
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/20 bg-white/10 px-5 py-4">
+              <p className="text-xs uppercase tracking-[0.14em] text-sky-200">
+                Total Liquid Assets
+              </p>
+              <p className="mt-1 text-2xl font-semibold">${totalLiquidAssets.toLocaleString()}</p>
+            </div>
+          </div>
+        </section>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="mb-6 flex items-start justify-between border-b border-slate-100 pb-4">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">Agency Banking Accounts</h1>
-            <p className="mt-1 text-sm text-slate-600">Manage business account balances in one place.</p>
+            <h2 className="text-xl font-semibold text-slate-900">Accounts Management</h2>
+            <p className="mt-1 text-sm text-slate-600">Create and track operational accounts by provider.</p>
           </div>
           <Link href="/dashboard" className="text-sm font-medium text-sky-700 hover:text-sky-800">
             Back
           </Link>
         </div>
 
-        <form onSubmit={handleAddAccount} className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <form onSubmit={handleAddAccount} className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
           <h2 className="text-sm font-semibold text-slate-900">Add New Account</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
             <input
               type="text"
               required
@@ -102,14 +127,19 @@ export default function AccountsPage() {
               placeholder="Account name"
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
             />
-            <input
-              type="text"
+            <select
               required
               value={type}
               onChange={(e) => setType(e.target.value)}
-              placeholder="Type (Bank, EVC, Cash)"
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
-            />
+            >
+              <option value="Hormoud EVC Plus">Hormoud EVC Plus</option>
+              <option value="Salaam Bank">Salaam Bank</option>
+              <option value="Premier Bank">Premier Bank</option>
+              <option value="M-Pesa (Safaricom)">M-Pesa (Safaricom)</option>
+              <option value="Dahabshiil">Dahabshiil</option>
+              <option value="Cash">Cash</option>
+            </select>
             <input
               type="text"
               inputMode="decimal"
@@ -130,41 +160,41 @@ export default function AccountsPage() {
           </div>
         </form>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Account Name</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Current Balance</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-500">
-                    Loading accounts...
-                  </td>
-                </tr>
-              ) : accounts.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-500">
-                    No accounts yet. Add your first account above.
-                  </td>
-                </tr>
-              ) : (
-                accounts.map((account) => (
-                  <tr key={account.id}>
-                    <td className="px-4 py-3 font-medium text-slate-900">{account.name}</td>
-                    <td className="px-4 py-3 text-slate-600">{account.type}</td>
-                    <td className="px-4 py-3 text-slate-800">${account.balance.toLocaleString()}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {loading ? (
+            <div className="col-span-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+              Loading accounts...
+            </div>
+          ) : accounts.length === 0 ? (
+            <div className="col-span-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+              No accounts yet. Add your first account above.
+            </div>
+          ) : (
+            accounts.map((account) => (
+              <article
+                key={account.id}
+                className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm"
+              >
+                <div className="flex items-start justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Business Account</p>
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                    {account.type}
+                  </span>
+                </div>
+                <h3 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">{account.name}</h3>
+                <div className="mt-8 flex items-end justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Available Balance</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-900">${account.balance.toLocaleString()}</p>
+                  </div>
+                  <div className="h-10 w-10 rounded-full bg-sky-100 ring-4 ring-sky-50" />
+                </div>
+              </article>
+            ))
+          )}
         </div>
         {submitError ? <p className="mt-3 text-xs font-medium text-rose-700">{submitError}</p> : null}
+      </div>
       </div>
     </main>
   );

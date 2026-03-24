@@ -632,41 +632,46 @@ export default function NewBookingPage() {
                     />
                   </div>
                 </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700">
-                      Payment method
-                    </label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
-                    >
-                      <option value="Cash">Cash</option>
-                      <option value="EVC">EVC</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                      <option value="Visa/Mastercard">Visa/Mastercard</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700">
-                      Deposit to
-                    </label>
-                    <select
-                      value={depositAccountId}
-                      onChange={(e) => setDepositAccountId(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
-                    >
-                      <option value="">No account selected</option>
-                      {bankingAccounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.name} ({account.type})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      Booking saves even if no account is selected.
-                    </p>
+                <div className="mt-4 border-t border-slate-200 pt-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                    Payment Details
+                  </h3>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700">
+                        Payment method
+                      </label>
+                      <select
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                      >
+                        <option value="Cash">Cash</option>
+                        <option value="EVC">EVC</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Visa/Mastercard">Visa/Mastercard</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700">
+                        Deposit to
+                      </label>
+                      <select
+                        value={depositAccountId}
+                        onChange={(e) => setDepositAccountId(e.target.value)}
+                        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                      >
+                        <option value="">No account selected</option>
+                        {bankingAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({account.type})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Booking saves even if no account is selected.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>

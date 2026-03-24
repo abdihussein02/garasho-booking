@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
+  const [agentName, setAgentName] = useState("Agent");
   const router = useRouter();
 
   useEffect(() => {
@@ -46,6 +47,11 @@ export default function DashboardPage() {
         const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL?.toLowerCase();
         const userRole = String(session.user.user_metadata?.role ?? "").toLowerCase();
         const userEmail = session.user.email?.toLowerCase();
+        const fullName =
+          String(session.user.user_metadata?.full_name ?? "").trim() ||
+          String(session.user.user_metadata?.name ?? "").trim();
+        const emailPrefix = userEmail ? userEmail.split("@")[0] : "Agent";
+        setAgentName(fullName || emailPrefix || "Agent");
         setIsOwner(Boolean(userRole === "owner" || (ownerEmail && userEmail === ownerEmail)));
 
         const primaryQuery = await supabase
@@ -125,6 +131,34 @@ export default function DashboardPage() {
   function getProfit(booking: Booking) {
     if (booking.selling_price === null || booking.net_cost === null) return null;
     return booking.selling_price - booking.net_cost;
+  }
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const salesThisMonth = bookings.reduce((sum, booking) => {
+    const dateString = booking.travel_date || booking.departure_date;
+    if (!dateString || booking.selling_price === null) return sum;
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return sum;
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear
+      ? sum + booking.selling_price
+      : sum;
+  }, 0);
+
+  const activeItineraries = bookings.filter((booking) => booking.status === "upcoming").length;
+  const totalProfit = bookings.reduce((sum, booking) => {
+    const p = getProfit(booking);
+    return p === null ? sum : sum + p;
+  }, 0);
+
+  const recentBookings = bookings.slice(0, 5);
+
+  function getPaymentBadge(status: Booking["status"]) {
+    if (status === "completed") return "Paid";
+    if (status === "cancelled") return "Cancelled";
+    return "Pending";
   }
 
   return (
@@ -207,16 +241,51 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <section className="mb-6 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 to-slate-800 px-6 py-6 text-white shadow-xl shadow-slate-300/40 sm:px-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">
+            Command Center
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+            Welcome back, {agentName}
+          </h2>
+          <p className="mt-2 text-sm text-slate-200">
+            Monitor sales, manage itineraries, and keep your operations moving.
+          </p>
+        </section>
+
+        <section className="mb-6 grid gap-4 md:grid-cols-3">
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Sales This Month
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">${salesThisMonth.toLocaleString()}</p>
+          </article>
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Active Itineraries
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">{activeItineraries}</p>
+          </article>
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Total Profit
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">
+              {isOwner ? `$${totalProfit.toLocaleString()}` : "Restricted"}
+            </p>
+          </article>
+        </section>
+
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-            Bookings
+            Recent Activity
           </div>
           <div className="divide-y divide-slate-100">
             {loading ? (
               <div className="px-4 py-10 text-center text-sm text-slate-500">
-                Loading bookings...
+                Loading activity...
               </div>
-            ) : bookings.length === 0 ? (
+            ) : recentBookings.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-slate-500">
                 No bookings yet.{" "}
                 <Link
@@ -234,14 +303,11 @@ export default function DashboardPage() {
                     <th className="px-4 py-3">Destination</th>
                     <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Status</th>
-                    {isOwner ? <th className="px-4 py-3">Net Cost</th> : null}
-                    <th className="px-4 py-3">Selling Price</th>
-                    {isOwner ? <th className="px-4 py-3">Profit</th> : null}
                     <th className="px-4 py-3">Documents</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
-                  {bookings.map((b) => (
+                  {recentBookings.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/70">
                       <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">
                         {b.traveler_name}
@@ -255,29 +321,16 @@ export default function DashboardPage() {
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                            b.status === "upcoming"
+                            b.status === "completed"
                               ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
-                              : b.status === "completed"
-                              ? "bg-slate-50 text-slate-700 ring-1 ring-slate-200"
+                              : b.status === "upcoming"
+                              ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
                               : "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
                           }`}
                         >
-                          {b.status}
+                          {getPaymentBadge(b.status)}
                         </span>
                       </td>
-                      {isOwner ? (
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatCurrency(b.net_cost)}
-                        </td>
-                      ) : null}
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {b.include_price ? formatCurrency(b.selling_price) : "Hidden"}
-                      </td>
-                      {isOwner ? (
-                        <td className="whitespace-nowrap px-4 py-3 font-medium text-emerald-700">
-                          {formatCurrency(getProfit(b))}
-                        </td>
-                      ) : null}
                       <td className="whitespace-nowrap px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Link
