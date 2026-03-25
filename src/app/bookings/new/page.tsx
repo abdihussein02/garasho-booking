@@ -147,7 +147,9 @@ type BankingAccount = {
   name: string;
   type: string;
   balance: number | null;
+  /** From `provider_name` (or legacy `provider`). */
   provider_name?: string | null;
+  account_category?: string | null;
 };
 
 /** Stable id for the first row so server and client markup match during hydration. */
@@ -236,10 +238,11 @@ export default function NewBookingPage() {
 
         const res = await supabase
           .from("banking_accounts")
-          .select("id, name, type, current_balance, provider_name, account_number")
+          .select("id, name, type, current_balance, provider_name, account_category, account_number")
           .order("name", { ascending: true });
         if (res.error) return;
         const raw = (res.data as Record<string, unknown>[]) ?? [];
+
         setBankingAccounts(
           raw.map((row) => ({
             id: String(row.id),
@@ -248,6 +251,7 @@ export default function NewBookingPage() {
             balance: row.current_balance != null ? Number(row.current_balance) : null,
             provider_name:
               (row.provider_name as string | null) ?? (row.provider as string | null) ?? null,
+            account_category: (row.account_category as string | null) ?? null,
           }))
         );
       } catch {
@@ -792,15 +796,16 @@ export default function NewBookingPage() {
                         <option value="">No account selected</option>
                         {bankingAccounts.map((account) => {
                           const providerLabel = account.provider_name?.trim() || "";
-                          const categoryFromType = account.type.includes("·")
-                            ? account.type
-                                .split("·")
-                                .map((s) => s.trim())
-                                .pop() || ""
-                            : "";
+                          const category =
+                            account.account_category?.trim() ||
+                            (account.type.includes("·")
+                              ? account.type
+                                  .split("·")
+                                  .map((s) => s.trim())
+                                  .pop() || ""
+                              : "");
                           const rail =
-                            [providerLabel, categoryFromType].filter(Boolean).join(" · ") ||
-                            account.type;
+                            [providerLabel, category].filter(Boolean).join(" · ") || account.type;
                           return (
                             <option key={account.id} value={account.id}>
                               {account.name} ({rail})
