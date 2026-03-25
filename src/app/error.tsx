@@ -1,5 +1,7 @@
 "use client";
 
+import { BackButton } from "@/components/BackButton";
+
 export default function AppError({
   error,
   reset,
@@ -9,6 +11,7 @@ export default function AppError({
 }) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 bg-slate-50 px-6 py-20 text-center">
+      <BackButton fallbackHref="/" className="mb-2" />
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0f172a]">GARASHO</p>
       <h1 className="text-xl font-semibold text-slate-900">We couldn&apos;t load this page</h1>
       <p className="max-w-md text-sm text-slate-600">

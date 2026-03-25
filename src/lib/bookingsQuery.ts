@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * Core booking columns for dashboard / CRM. Extend when adding fields.
  */
 export const BOOKINGS_SELECT_BASE =
-  "id, traveler_name, destination, destination_city, departure_date, selling_price, net_cost, include_price, status, passport_expiry_date, visa_services_enabled, visa_status";
+  "id, traveler_name, destination, destination_city, departure_date, selling_price, net_cost, include_price, status, passport_expiry_date, visa_services_enabled, visa_status, visa_service_fee";
 
 /**
  * Join-ready select: pulls optional schedule/seat rows from `airline_trips` when `airline_trip_id` is set.

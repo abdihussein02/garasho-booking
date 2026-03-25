@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { BackButton } from "@/components/BackButton";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -47,6 +48,7 @@ export default function AuthPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg shadow-slate-200">
+        <BackButton fallbackHref="/" className="-ml-1 mb-4 px-2 py-1" />
         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
           GARASHO · Prime Time
         </p>

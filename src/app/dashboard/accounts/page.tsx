@@ -6,7 +6,7 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
-const PROVIDERS = ["Hormoud", "Salaam", "Premier", "M-Pesa", "Cash"] as const;
+const PROVIDERS = ["Hormoud", "Salaam", "Premier", "EVC", "M-Pesa", "Cash"] as const;
 
 type RailUi = "Bank" | "Mobile" | "Cash";
 
@@ -38,7 +38,8 @@ function maskAccountNumber(raw: string | null | undefined): string {
 function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" | "card" {
   const s = provider.toLowerCase();
   if (s.includes("cash")) return "cash";
-  if (s.includes("hormoud") || s.includes("m-pesa") || s.includes("mpesa")) return "mobile";
+  if (s.includes("hormoud") || s.includes("evc") || s.includes("m-pesa") || s.includes("mpesa"))
+    return "mobile";
   if (s.includes("salaam") || s.includes("premier") || s.includes("dahabshiil")) return "bank";
   return "bank";
 }
@@ -514,7 +515,9 @@ export default function AccountsPage() {
                   />
                 </div>
                 <div className="min-w-[min(100%,10rem)] flex-1">
-                  <label className="block text-[11px] font-medium text-slate-600">Provider</label>
+                  <label className="block text-[11px] font-medium text-slate-600">
+                    Provider name
+                  </label>
                   <select
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}

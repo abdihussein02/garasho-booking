@@ -19,6 +19,7 @@ type Booking = {
   passport_expiry_date?: string | null;
   visa_services_enabled?: boolean | null;
   visa_status?: string | null;
+  visa_service_fee?: number | null;
 };
 
 function normalizeRow(raw: Record<string, unknown>): Booking {
@@ -35,9 +36,12 @@ function normalizeRow(raw: Record<string, unknown>): Booking {
     passport_expiry_date: (raw.passport_expiry_date as string | null) ?? null,
     visa_services_enabled: (raw.visa_services_enabled as boolean | null) ?? null,
     visa_status: (raw.visa_status as string | null) ?? null,
+    visa_service_fee:
+      raw.visa_service_fee != null ? Number(raw.visa_service_fee) : null,
   };
 }
 
+/** Expired passports or expiry within the next six months (renewal window). */
 function passportExpiringWithinSixMonths(iso: string | null | undefined): boolean {
   if (!iso) return false;
   const exp = new Date(iso);
@@ -45,7 +49,7 @@ function passportExpiringWithinSixMonths(iso: string | null | undefined): boolea
   const now = new Date();
   const horizon = new Date(now);
   horizon.setMonth(horizon.getMonth() + 6);
-  return exp >= now && exp <= horizon;
+  return exp <= horizon;
 }
 
 const navLink =
@@ -159,11 +163,17 @@ export default function DashboardPage() {
       bookings.reduce((sum, b) => sum + (b.selling_price != null ? b.selling_price : 0), 0),
     [bookings]
   );
-  const totalNetSum = useMemo(
-    () => bookings.reduce((sum, b) => sum + (b.net_cost != null ? b.net_cost : 0), 0),
+  /** (Selling price − net cost) + visa fees per booking, summed. */
+  const portfolioProfit = useMemo(
+    () =>
+      bookings.reduce((sum, b) => {
+        const sell = b.selling_price != null ? b.selling_price : 0;
+        const net = b.net_cost != null ? b.net_cost : 0;
+        const visa = b.visa_service_fee != null ? b.visa_service_fee : 0;
+        return sum + (sell - net + visa);
+      }, 0),
     [bookings]
   );
-  const portfolioProfit = totalSellingSum - totalNetSum;
   const chartMax = Math.max(totalSellingSum, Math.abs(portfolioProfit), 1);
 
   function getPaymentBadge(status: Booking["status"]) {
@@ -284,27 +294,27 @@ export default function DashboardPage() {
               })}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Sum of selling prices minus sum of net costs (all bookings)
+              (Selling price − net cost) + visa fees, summed across all bookings
             </p>
           </article>
           <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Total liquidity
+              Total liquid assets
             </p>
             <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-[#0f172a]">
               {totalLiquidity === null ? "—" : `$${totalLiquidity.toLocaleString()}`}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Sum of banking wallet balances</p>
+            <p className="mt-1 text-xs text-slate-500">Sum of all banking account balances</p>
           </article>
         </section>
 
         <div className="mb-6 overflow-hidden rounded-2xl border border-amber-200/80 bg-amber-50/40 shadow-sm">
           <div className="border-b border-amber-200/60 bg-amber-50/80 px-4 py-2.5">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-900">
-              Passport expiry watch
+              Passport watch
             </p>
             <p className="mt-0.5 text-[11px] text-amber-900/80">
-              Travelers with passports expiring within six months
+              Passports already expired or expiring within six months
             </p>
           </div>
           {loading ? (
@@ -443,8 +453,8 @@ export default function DashboardPage() {
             </p>
             <p className="mt-1 text-sm font-semibold text-[#0f172a]">Portfolio snapshot</p>
             <p className="mt-1 text-xs text-slate-500">
-              Revenue is the sum of selling prices; profit is that total minus the sum of net costs
-              (same basis as the Total profit card).
+              Revenue is the sum of selling prices; profit matches the Total profit card: (selling −
+              net) + visa fees per booking.
             </p>
             <div className="mt-6 flex h-44 items-end justify-center gap-8 sm:gap-16">
               <div className="flex w-24 flex-col items-center gap-2 sm:w-32">

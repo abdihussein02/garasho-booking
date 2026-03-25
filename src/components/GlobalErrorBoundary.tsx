@@ -1,5 +1,6 @@
 "use client";
 
+import { BackButton } from "@/components/BackButton";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 type Props = { children: ReactNode };
@@ -21,6 +22,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 bg-slate-50 px-6 py-16 text-center">
+          <BackButton fallbackHref="/dashboard" className="mb-1" />
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
             GARASHO
           </p>

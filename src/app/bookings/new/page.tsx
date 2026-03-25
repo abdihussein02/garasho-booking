@@ -318,7 +318,9 @@ export default function NewBookingPage() {
       const sellingPriceForDb = totalSellingPrice > 0 ? totalSellingPrice : null;
 
       // Try inserting with the newer flight info fields first.
-      const bookingPayload = {
+      const depositFk = depositAccountId || null;
+
+      const bookingPayloadBase = {
         traveler_name: travelerName,
         traveler_phone: travelerPhone.trim() || null,
         passport_id_number: passportIdNumber.trim() || null,
@@ -335,12 +337,16 @@ export default function NewBookingPage() {
         departure_date: departureDate,
         include_price: includePrice,
         payment_method: paymentMethod,
-        deposit_account_id: depositAccountId || null,
         visa_services_enabled: visaServicesEnabled,
         visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
         visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
         visa_status: visaServicesEnabled ? visaStatus : null,
         notes,
+      };
+
+      const bookingPayload = {
+        ...bookingPayloadBase,
+        deposit_to_id: depositFk,
       };
 
       const insertPrimary = await supabase
@@ -353,6 +359,20 @@ export default function NewBookingPage() {
       let error = insertPrimary.error;
 
       // Fallback chain: preserve as much user data as possible across schema versions.
+      if (error) {
+        const fallbackLegacyDeposit = await supabase
+          .from("bookings")
+          .insert({
+            ...bookingPayloadBase,
+            deposit_account_id: depositFk,
+          })
+          .select("id")
+          .single();
+
+        booking = fallbackLegacyDeposit.data;
+        error = fallbackLegacyDeposit.error;
+      }
+
       if (error) {
         const fallbackExtended = await supabase
           .from("bookings")
@@ -376,7 +396,7 @@ export default function NewBookingPage() {
             selling_price: sellingPriceForDb,
             include_price: includePrice,
             payment_method: paymentMethod,
-            deposit_account_id: depositAccountId || null,
+            deposit_to_id: depositFk,
             visa_services_enabled: visaServicesEnabled,
             visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
             visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
@@ -387,6 +407,42 @@ export default function NewBookingPage() {
 
         booking = fallbackExtended.data;
         error = fallbackExtended.error;
+      }
+
+      if (error) {
+        const fallbackExtendedLegacyDeposit = await supabase
+          .from("bookings")
+          .insert({
+            traveler_name: travelerName,
+            traveler_phone: travelerPhone.trim() || null,
+            passport_id_number: passportIdNumber.trim() || null,
+            passport_issue_date: passportIssueDate || null,
+            passport_expiry_date: passportExpiryDate || null,
+            destination: destinationCity,
+            departure_date: departureDate,
+            return_date: null,
+            notes,
+            departure_city: departureCity,
+            destination_city: destinationCity,
+            departure_time: dep24,
+            arrival_time: arr24,
+            airline_name: airlineName,
+            flight_number: flightNumber,
+            net_cost: parsedNetCost,
+            selling_price: sellingPriceForDb,
+            include_price: includePrice,
+            payment_method: paymentMethod,
+            deposit_account_id: depositFk,
+            visa_services_enabled: visaServicesEnabled,
+            visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
+            visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
+            visa_status: visaServicesEnabled ? visaStatus : null,
+          })
+          .select("id")
+          .single();
+
+        booking = fallbackExtendedLegacyDeposit.data;
+        error = fallbackExtendedLegacyDeposit.error;
       }
 
       if (error) {
@@ -891,7 +947,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Phone number</label>
+                <label className="block text-xs font-medium text-slate-700">Traveler phone</label>
                 <input
                   type="tel"
                   value={travelerPhone}
@@ -902,7 +958,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Passport / ID number</label>
+                <label className="block text-xs font-medium text-slate-700">Passport number</label>
                 <input
                   type="text"
                   value={passportIdNumber}
@@ -921,7 +977,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Passport expiry date</label>
+                <label className="block text-xs font-medium text-slate-700">Passport expiry</label>
                 <input
                   type="date"
                   value={passportExpiryDate}
