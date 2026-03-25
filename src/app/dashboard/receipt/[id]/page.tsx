@@ -94,7 +94,12 @@ export default function ReceiptPage() {
     <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-8">
       <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-start justify-between border-b border-slate-100 pb-4">
-          <h1 className="text-xl font-semibold text-slate-900">Professional Receipt</h1>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
+              GARASHO
+            </p>
+            <h1 className="mt-1 text-xl font-semibold text-slate-900">Professional Receipt</h1>
+          </div>
           <BackButton className="px-2 py-1" />
         </div>
 

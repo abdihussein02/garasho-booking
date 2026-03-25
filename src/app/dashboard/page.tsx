@@ -38,7 +38,7 @@ function normalizeRow(raw: Record<string, unknown>): Booking {
   };
 }
 
-/** Expired passports or expiry within the next six months (renewal window). */
+/** Passport expiry date is between today and six months from now (renewal window). */
 function passportExpiringWithinSixMonths(iso: string | null | undefined): boolean {
   if (!iso) return false;
   const exp = new Date(iso);
@@ -46,7 +46,7 @@ function passportExpiringWithinSixMonths(iso: string | null | undefined): boolea
   const now = new Date();
   const horizon = new Date(now);
   horizon.setMonth(horizon.getMonth() + 6);
-  return exp <= horizon;
+  return exp >= now && exp <= horizon;
 }
 
 const navLink =
@@ -79,6 +79,8 @@ export default function DashboardPage() {
         const emailPrefix = userEmail ? userEmail.split("@")[0] : "Agent";
         setAgentName(fullName || emailPrefix || "Agent");
 
+        await supabase.auth.refreshSession().catch(() => {});
+
         const { data, error } = await fetchBookingsWithOptionalTripJoin(supabase);
         if (error) throw error;
 
@@ -93,12 +95,15 @@ export default function DashboardPage() {
         });
         setBookings(rows);
 
-        const liq = await supabase.from("banking_accounts").select("balance");
-        if (!liq.error && liq.data) {
-          const sum = (liq.data as { balance: number | string | null }[]).reduce(
-            (s, row) => s + (Number(row.balance) || 0),
-            0
-          );
+        let liq = await supabase.from("banking_accounts").select("current_balance");
+        if (liq.error) {
+          liq = await supabase.from("banking_accounts").select("balance");
+        }
+        if (!liq.error && liq.data != null) {
+          const sum = (liq.data as Record<string, unknown>[]).reduce((s, row) => {
+            const v = row.current_balance ?? row.balance;
+            return s + (Number(v) || 0);
+          }, 0);
           setTotalLiquidity(sum);
         } else {
           setTotalLiquidity(null);
@@ -284,13 +289,15 @@ export default function DashboardPage() {
               Total profit
             </p>
             <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-[#0f172a]">
-              ${portfolioProfit.toLocaleString(undefined, {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 2,
-              })}
+              {loading
+                ? "—"
+                : `$${portfolioProfit.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                  })}`}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Selling price minus net cost, summed across all bookings
+              Live from Supabase: selling price minus net cost, all bookings
             </p>
           </article>
           <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
@@ -298,9 +305,14 @@ export default function DashboardPage() {
               Total liquid assets
             </p>
             <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-[#0f172a]">
-              {totalLiquidity === null ? "—" : `$${totalLiquidity.toLocaleString()}`}
+              {loading || totalLiquidity === null
+                ? "—"
+                : `$${totalLiquidity.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                  })}`}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Sum of all banking account balances</p>
+            <p className="mt-1 text-xs text-slate-500">Live sum of all banking_accounts balances</p>
           </article>
         </section>
 
@@ -310,7 +322,7 @@ export default function DashboardPage() {
               Passport watch
             </p>
             <p className="mt-0.5 text-[11px] text-amber-900/80">
-              Passports already expired or expiring within six months
+              Travelers whose passport expires within the next six months
             </p>
           </div>
           {loading ? (

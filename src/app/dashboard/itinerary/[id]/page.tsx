@@ -125,7 +125,10 @@ export default function ItineraryPage() {
       <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-start justify-between border-b border-slate-100 pb-4">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">Professional Itinerary</h1>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
+              GARASHO
+            </p>
+            <h1 className="mt-1 text-xl font-semibold text-slate-900">Professional Itinerary</h1>
             <p className="mt-1 text-sm text-slate-600">Booking ID: {booking.id}</p>
           </div>
           <BackButton className="px-2 py-1" />

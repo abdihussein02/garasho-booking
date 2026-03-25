@@ -26,6 +26,16 @@ type Account = {
   account_number: string | null;
 };
 
+function displayProviderName(account: Account): string {
+  return (
+    account.provider?.trim() ||
+    ((account.type || "").includes("·")
+      ? (account.type || "").split("·")[0]!.trim()
+      : account.type) ||
+    ""
+  );
+}
+
 function maskAccountNumber(raw: string | null | undefined): string {
   if (!raw || !String(raw).trim()) return "—";
   const digits = String(raw).replace(/\D/g, "");
@@ -34,11 +44,11 @@ function maskAccountNumber(raw: string | null | undefined): string {
   return `****${digits.slice(-4)}`;
 }
 
-/** Hormoud / M-Pesa → mobile; Salaam / Premier / Dahabshiil → bank; Cash → cash. */
+/** Cash → green; EVC / Hormoud / M-Pesa → purple (mobile); Salaam / Premier / banks → blue. */
 function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" | "card" {
   const s = provider.toLowerCase();
   if (s.includes("cash")) return "cash";
-  if (s.includes("hormoud") || s.includes("evc") || s.includes("m-pesa") || s.includes("mpesa"))
+  if (s.includes("evc") || s.includes("hormoud") || s.includes("m-pesa") || s.includes("mpesa"))
     return "mobile";
   if (s.includes("salaam") || s.includes("premier") || s.includes("dahabshiil")) return "bank";
   return "bank";
@@ -68,6 +78,8 @@ function resolveAccountKind(account: Account): "Bank Account" | "Mobile Money" |
 }
 
 function cardGradientTheme(account: Account, displayProvider: string) {
+  const low = displayProvider.toLowerCase();
+  if (low.includes("evc")) return getCategoryTheme("Mobile Money");
   const kind = resolveAccountKind(account);
   if (kind) return getCategoryTheme(kind);
   return walletThemeFromProvider(displayProvider, resolveDisplayCategory(account));
@@ -245,6 +257,25 @@ function railDbValue(rail: RailUi): "Bank Account" | "Mobile Money" | "Cash" {
   return RAIL_OPTIONS.find((o) => o.value === rail)!.db;
 }
 
+/** Map DB row to UI account (`current_balance` column → local `balance` for display). */
+function rowToAccount(row: Record<string, unknown>): Account {
+  const raw =
+    row.current_balance != null
+      ? row.current_balance
+      : row.balance != null
+        ? row.balance
+        : 0;
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    type: String(row.type ?? "Account"),
+    balance: Number(raw) || 0,
+    provider: (row.provider as string | null) ?? null,
+    account_category: (row.account_category as string | null) ?? null,
+    account_number: (row.account_number as string | null) ?? null,
+  };
+}
+
 export default function AccountsPage() {
   const addFormTitleId = useId();
   const { toast } = useToast();
@@ -262,40 +293,16 @@ export default function AccountsPage() {
 
   async function loadAccounts() {
     const supabase = getSupabaseBrowserClient();
-    const full = await supabase
+    await supabase.auth.refreshSession().catch(() => {});
+
+    const res = await supabase
       .from("banking_accounts")
-      .select("id, name, type, balance, provider, account_category, account_number")
+      .select("id, name, type, current_balance, provider, account_category, account_number")
       .order("name", { ascending: true });
 
-    if (full.error) {
-      const minimal = await supabase
-        .from("banking_accounts")
-        .select("id, name, type, balance")
-        .order("name", { ascending: true });
-      if (minimal.error) throw minimal.error;
-      setAccounts(
-        ((minimal.data as Pick<Account, "id" | "name" | "type" | "balance">[]) ?? []).map(
-          (a) => ({
-            ...a,
-            balance: Number(a.balance) || 0,
-            provider: null,
-            account_category: null,
-            account_number: null,
-          })
-        )
-      );
-      return;
-    }
-
-    setAccounts(
-      ((full.data as Account[]) ?? []).map((a) => ({
-        ...a,
-        balance: Number(a.balance) || 0,
-        provider: a.provider ?? null,
-        account_category: a.account_category ?? null,
-        account_number: a.account_number ?? null,
-      }))
-    );
+    if (res.error) throw res.error;
+    const rows = (res.data as unknown as Record<string, unknown>[]) ?? [];
+    setAccounts(rows.map(rowToAccount));
   }
 
   useEffect(() => {
@@ -345,25 +352,30 @@ export default function AccountsPage() {
     setCreating(true);
     try {
       const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
 
-      const payloadFull = {
-        name: name.trim(),
+      const providerLabel = provider.trim();
+      const accountName = name.trim();
+      const acctNum = accountNumber.trim();
+
+      const payload = {
+        name: accountName,
         type: typeDisplay,
-        balance: parsedBalance,
-        provider: provider.trim(),
+        current_balance: parsedBalance,
+        provider: providerLabel,
         account_category: accountCategoryDb,
-        account_number: accountNumber.trim(),
+        account_number: acctNum,
       };
 
-      const inserted = await supabase.from("banking_accounts").insert(payloadFull).select("id").maybeSingle();
+      let inserted = await supabase.from("banking_accounts").insert(payload).select("id").maybeSingle();
 
       if (inserted.error) {
         const minimal = await supabase
           .from("banking_accounts")
           .insert({
-            name: name.trim(),
+            name: accountName,
             type: typeDisplay,
-            balance: parsedBalance,
+            current_balance: parsedBalance,
           })
           .select("id")
           .single();
@@ -379,9 +391,9 @@ export default function AccountsPage() {
         const { error: patchErr } = await supabase
           .from("banking_accounts")
           .update({
-            provider: provider.trim(),
+            provider: providerLabel,
             account_category: accountCategoryDb,
-            account_number: accountNumber.trim(),
+            account_number: acctNum,
           })
           .eq("id", rowId);
 
@@ -390,7 +402,9 @@ export default function AccountsPage() {
             /column|does not exist|schema cache|could not find/i.test(patchErr.message || "");
           if (!ignorable) {
             const msg = formatSupabaseUserMessage(patchErr.message);
+            setSubmitError(msg);
             toast("error", msg);
+            return;
           }
         }
       }
@@ -403,6 +417,7 @@ export default function AccountsPage() {
       setAddPanelOpen(false);
       setSubmitError(null);
       await loadAccounts();
+      toast("success", "Account saved.");
     } catch (error) {
       const raw = error instanceof Error ? error.message : "We couldn’t add this account.";
       const msg = formatSupabaseUserMessage(raw);
@@ -504,8 +519,12 @@ export default function AccountsPage() {
             <form onSubmit={handleAddAccount} className="space-y-4">
               <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-end xl:gap-4">
                 <div className="min-w-[min(100%,12rem)] flex-1">
-                  <label className="block text-[11px] font-medium text-slate-600">Account name</label>
+                  <label htmlFor="garasho-account-name" className="block text-[11px] font-medium text-slate-600">
+                    Account name
+                  </label>
                   <input
+                    id="garasho-account-name"
+                    name="name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -515,7 +534,7 @@ export default function AccountsPage() {
                   />
                 </div>
                 <div className="min-w-[min(100%,10rem)] flex-1">
-                  <label className="block text-[11px] font-medium text-slate-600">Provider</label>
+                  <label className="block text-[11px] font-medium text-slate-600">Provider name</label>
                   <select
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}
@@ -618,12 +637,7 @@ export default function AccountsPage() {
         ) : (
           <ul className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {accounts.map((account) => {
-              const displayProvider =
-                account.provider?.trim() ||
-                ((account.type || "").includes("·")
-                  ? (account.type || "").split("·")[0]!.trim()
-                  : account.type) ||
-                "—";
+              const displayProvider = displayProviderName(account) || "—";
               const theme = cardGradientTheme(account, displayProvider);
               return (
                 <li key={account.id}>

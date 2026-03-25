@@ -233,20 +233,27 @@ export default function NewBookingPage() {
     async function loadAccounts() {
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data, error } = await supabase
+        await supabase.auth.refreshSession().catch(() => {});
+
+        const res = await supabase
           .from("banking_accounts")
-          .select("id, name, type, balance, provider, account_category")
+          .select("id, name, type, current_balance, provider, account_category, account_number")
           .order("name", { ascending: true });
-        if (error) {
-          const fb = await supabase
-            .from("banking_accounts")
-            .select("id, name, type, balance")
-            .order("name", { ascending: true });
-          if (fb.error) return;
-          setBankingAccounts((fb.data as BankingAccount[]) ?? []);
-          return;
-        }
-        setBankingAccounts((data as BankingAccount[]) ?? []);
+        if (res.error) return;
+        const raw = (res.data as Record<string, unknown>[]) ?? [];
+        setBankingAccounts(
+          raw.map((row) => {
+            const balRaw = row.current_balance ?? row.balance;
+            return {
+              id: String(row.id),
+              name: String(row.name ?? ""),
+              type: String(row.type ?? ""),
+              balance: balRaw != null ? Number(balRaw) : null,
+              provider: (row.provider as string | null) ?? null,
+              account_category: (row.account_category as string | null) ?? null,
+            };
+          })
+        );
       } catch {
         setBankingAccounts([]);
       }
@@ -275,6 +282,7 @@ export default function NewBookingPage() {
 
     try {
       const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
 
       const dep24 = parseTimeTo24h(departureTime);
       const arr24 = parseTimeTo24h(arrivalTime);
@@ -319,11 +327,13 @@ export default function NewBookingPage() {
 
       // Try inserting with the newer flight info fields first.
       const depositFk = depositAccountId || null;
+      const passportNum = passportIdNumber.trim() || null;
 
       const bookingPayloadBase = {
         traveler_name: travelerName,
         traveler_phone: travelerPhone.trim() || null,
-        passport_id_number: passportIdNumber.trim() || null,
+        passport_number: passportNum,
+        passport_id_number: passportNum,
         passport_issue_date: passportIssueDate || null,
         passport_expiry_date: passportExpiryDate || null,
         departure_city: departureCity,
@@ -358,9 +368,8 @@ export default function NewBookingPage() {
       let booking = insertPrimary.data;
       let error = insertPrimary.error;
 
-      // Fallback chain: preserve as much user data as possible across schema versions.
-      // Only the primary insert uses `deposit_to_id`. All fallbacks use `deposit_account_id` so
-      // databases without `deposit_to_id` still save the booking and link the deposit.
+      // Fallback chain: only the first insert may include `deposit_to_id`. Never retry `deposit_to_id`.
+      // All fallbacks use `deposit_account_id` only (legacy FK).
       if (error) {
         const fallbackLegacyDeposit = await supabase
           .from("bookings")
@@ -381,7 +390,8 @@ export default function NewBookingPage() {
           .insert({
             traveler_name: travelerName,
             traveler_phone: travelerPhone.trim() || null,
-            passport_id_number: passportIdNumber.trim() || null,
+            passport_number: passportNum,
+            passport_id_number: passportNum,
             passport_issue_date: passportIssueDate || null,
             passport_expiry_date: passportExpiryDate || null,
             destination: destinationCity,
@@ -785,10 +795,10 @@ export default function NewBookingPage() {
                       >
                         <option value="">No account selected</option>
                         {bankingAccounts.map((account) => {
+                          const providerLabel = account.provider?.trim() || "";
                           const rail =
-                            [account.provider, account.account_category]
-                              .filter(Boolean)
-                              .join(" · ") || account.type;
+                            [providerLabel, account.account_category].filter(Boolean).join(" · ") ||
+                            account.type;
                           return (
                             <option key={account.id} value={account.id}>
                               {account.name} ({rail})
@@ -914,7 +924,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Phone</label>
+                <label className="block text-xs font-medium text-slate-700">Traveler phone</label>
                 <input
                   type="tel"
                   value={travelerPhone}
@@ -944,7 +954,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Expiry</label>
+                <label className="block text-xs font-medium text-slate-700">Passport expiry</label>
                 <input
                   type="date"
                   value={passportExpiryDate}

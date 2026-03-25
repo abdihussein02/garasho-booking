@@ -4,7 +4,7 @@ create table if not exists public.banking_accounts (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   type text not null default 'Account',
-  balance numeric not null default 0,
+  current_balance numeric not null default 0,
   provider text,
   account_category text,
   account_number text,
