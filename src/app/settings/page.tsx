@@ -8,6 +8,7 @@ export default function SettingsPage() {
   const [agencyName, setAgencyName] = useState("Your Travel Agency");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -35,18 +36,30 @@ export default function SettingsPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
+    setSubmitError(null);
     try {
       const supabase = getSupabaseBrowserClient();
 
-      // Optional: persist to Supabase agencies table if you have one
-      await supabase.rpc("upsert_agency_profile", {
+      const { error: rpcError } = await supabase.rpc("upsert_agency_profile", {
         name: agencyName,
       });
-      // Ignore RPC errors — procedure is optional and may not exist.
+
+      if (rpcError) {
+        const msg = rpcError.message?.trim() ?? "";
+        const optionalMissing =
+          rpcError.code === "PGRST202" ||
+          /could not find|does not exist|schema cache/i.test(msg);
+        if (!optionalMissing) {
+          setSubmitError(msg || "Could not save agency profile to the server.");
+        }
+      }
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem("agency_name", agencyName);
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Something went wrong while saving.";
+      setSubmitError(msg);
     } finally {
       setSaving(false);
     }
@@ -117,6 +130,12 @@ export default function SettingsPage() {
               itineraries.
             </p>
           </div>
+
+          {submitError ? (
+            <p className="text-sm text-rose-600" role="alert">
+              {submitError}
+            </p>
+          ) : null}
 
           <div className="flex justify-end pt-2">
             <button
