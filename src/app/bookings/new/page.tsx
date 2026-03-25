@@ -144,6 +144,8 @@ type BankingAccount = {
   name: string;
   type: string;
   balance: number | null;
+  provider?: string | null;
+  account_category?: string | null;
 };
 
 /** Stable id for the first row so server and client markup match during hydration. */
@@ -207,9 +209,17 @@ export default function NewBookingPage() {
         const supabase = getSupabaseBrowserClient();
         const { data, error } = await supabase
           .from("banking_accounts")
-          .select("id, name, type, balance")
+          .select("id, name, type, balance, provider, account_category")
           .order("name", { ascending: true });
-        if (error) return;
+        if (error) {
+          const fb = await supabase
+            .from("banking_accounts")
+            .select("id, name, type, balance")
+            .order("name", { ascending: true });
+          if (fb.error) return;
+          setBankingAccounts((fb.data as BankingAccount[]) ?? []);
+          return;
+        }
         setBankingAccounts((data as BankingAccount[]) ?? []);
       } catch {
         setBankingAccounts([]);
@@ -787,11 +797,17 @@ export default function NewBookingPage() {
                         className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
                       >
                         <option value="">No account selected</option>
-                        {bankingAccounts.map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.name} ({account.type})
-                          </option>
-                        ))}
+                        {bankingAccounts.map((account) => {
+                          const rail =
+                            [account.provider, account.account_category]
+                              .filter(Boolean)
+                              .join(" · ") || account.type;
+                          return (
+                            <option key={account.id} value={account.id}>
+                              {account.name} ({rail})
+                            </option>
+                          );
+                        })}
                       </select>
                       <p className="mt-1 text-[11px] text-slate-500">
                         Booking saves even if no account is selected.
