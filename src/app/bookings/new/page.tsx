@@ -1,7 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { BackButton } from "@/components/BackButton";
+import { useToast } from "@/components/providers/ToastProvider";
+import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import jsPDF from "jspdf";
@@ -170,7 +173,11 @@ const VISA_DESTINATIONS = [
   "Other",
 ] as const;
 
+const fieldClass =
+  "mt-1 block w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-1 ring-slate-200/80 transition placeholder:text-slate-400 focus:border-[#0f172a]/25 focus:ring-2 focus:ring-[#0f172a]/15";
+
 export default function NewBookingPage() {
+  const { toast } = useToast();
   const [travelerName, setTravelerName] = useState("");
   const [travelerPhone, setTravelerPhone] = useState("");
   const [passportIdNumber, setPassportIdNumber] = useState("");
@@ -202,6 +209,25 @@ export default function NewBookingPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const router = useRouter();
+
+  function copyPassportToNotes() {
+    const lines = [
+      travelerName.trim() && `Traveler: ${travelerName.trim()}`,
+      passportIdNumber.trim() && `Passport/ID: ${passportIdNumber.trim()}`,
+      passportIssueDate && `Issued: ${passportIssueDate}`,
+      passportExpiryDate && `Expires: ${passportExpiryDate}`,
+    ].filter(Boolean) as string[];
+    if (lines.length === 0) {
+      toast("error", "Add at least one passport or ID detail first.");
+      return;
+    }
+    const block = ["--- Passport (CRM) ---", ...lines].join("\n");
+    setNotes((prev) => {
+      const p = prev.trim();
+      return p ? `${p}\n\n${block}` : block;
+    });
+    toast("success", "Passport details copied to notes.");
+  }
 
   useEffect(() => {
     async function loadAccounts() {
@@ -436,6 +462,7 @@ export default function NewBookingPage() {
             : "";
       const message = rawMessage.trim() || "Something went wrong while saving. Please try again.";
       setSubmitError(message);
+      toast("error", formatSupabaseUserMessage(message));
     } finally {
       setSaving(false);
     }
@@ -534,113 +561,63 @@ export default function NewBookingPage() {
   }
 
   return (
-    <main className="flex min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-8">
-      <div className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-6 shadow-lg shadow-slate-200 sm:p-8">
-        <div className="flex flex-col gap-4 border-b border-slate-100 pb-5">
+    <main className="flex min-h-screen bg-slate-100/80 px-4 py-6 sm:px-8 sm:py-8">
+      <div className="mx-auto w-full max-w-4xl rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm sm:p-8">
+        <div className="flex flex-col gap-4 border-b border-slate-200/90 pb-5">
           <BackButton className="-ml-1 px-2 py-1" />
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
+                GARASHO · Prime Time
+              </p>
+              <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#0f172a] sm:text-2xl">
                 New booking
               </h1>
               <p className="mt-1 text-sm text-slate-600">
-                Capture traveler details, flights, and layovers in one place.
+                Enterprise CRM for East African agencies — flight, traveler, and visa in one flow.
               </p>
             </div>
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-[#0f172a] shadow-sm hover:bg-slate-50"
             >
               Print itinerary (PDF)
             </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="block text-xs font-medium text-slate-700">
-                Traveler name
-              </label>
-              <input
-                type="text"
-                required
-                value={travelerName}
-                onChange={(e) => setTravelerName(e.target.value)}
-                className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700">
-                Airline name
-              </label>
-              <input
-                type="text"
-                value={airlineName}
-                onChange={(e) => setAirlineName(e.target.value)}
-                placeholder="e.g. Turkish Airlines"
-                className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
-              />
-            </div>
-          </div>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-8">
+          <section className="rounded-2xl border border-slate-200/90 bg-slate-50/40 p-5 sm:p-6">
+            <header className="border-b border-slate-200/80 pb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">01</p>
+              <h2 className="mt-1 text-base font-semibold text-[#0f172a]">Flight details</h2>
+              <p className="mt-1 text-xs text-slate-600">
+                Route, schedule, commercial terms, connections, and layovers.
+              </p>
+            </header>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-            <h2 className="text-sm font-semibold text-slate-900">Traveler Identity</h2>
-            <p className="mt-1 text-[11px] text-slate-500">
-              Stored securely for CRM; not shown on the customer-facing itinerary.
-            </p>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-xs font-medium text-slate-700">Phone number</label>
-                <input
-                  type="tel"
-                  value={travelerPhone}
-                  onChange={(e) => setTravelerPhone(e.target.value)}
-                  autoComplete="tel"
-                  placeholder="+252 ..."
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Passport / ID number</label>
+                <label className="block text-xs font-medium text-slate-700">Airline</label>
                 <input
                   type="text"
-                  value={passportIdNumber}
-                  onChange={(e) => setPassportIdNumber(e.target.value)}
-                  autoComplete="off"
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  value={airlineName}
+                  onChange={(e) => setAirlineName(e.target.value)}
+                  placeholder="e.g. Turkish Airlines"
+                  className={fieldClass}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Passport issue date</label>
+                <label className="block text-xs font-medium text-slate-700">Flight number</label>
                 <input
-                  type="date"
-                  value={passportIssueDate}
-                  onChange={(e) => setPassportIssueDate(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  type="text"
+                  value={flightNumber}
+                  onChange={(e) => setFlightNumber(e.target.value)}
+                  placeholder="e.g. TK647"
+                  className={fieldClass}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Passport expiry date</label>
-                <input
-                  type="date"
-                  value={passportExpiryDate}
-                  onChange={(e) => setPassportExpiryDate(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
-                />
-              </div>
-            </div>
-          </section>
-
-          <div>
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">
-                Flight info
-              </h2>
-            </div>
-
-            <div className="mt-3 grid gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-slate-700">
                   Departure city
@@ -650,7 +627,7 @@ export default function NewBookingPage() {
                   required
                   value={departureCity}
                   onChange={(e) => setDepartureCity(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  className={fieldClass}
                 />
               </div>
               <div>
@@ -662,19 +639,7 @@ export default function NewBookingPage() {
                   required
                   value={destinationCity}
                   onChange={(e) => setDestinationCity(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">
-                  Flight number
-                </label>
-                <input
-                  type="text"
-                  value={flightNumber}
-                  onChange={(e) => setFlightNumber(e.target.value)}
-                  placeholder="e.g. TK647"
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  className={fieldClass}
                 />
               </div>
 
@@ -687,7 +652,7 @@ export default function NewBookingPage() {
                   required
                   value={departureDate}
                   onChange={(e) => setDepartureDate(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  className={fieldClass}
                 />
               </div>
 
@@ -817,22 +782,199 @@ export default function NewBookingPage() {
                 </div>
               </div>
             </div>
-          </div>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                  Layovers
+                </h3>
+                <button
+                  type="button"
+                  onClick={addLayoverRow}
+                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-[#0f172a] hover:border-[#0f172a]/30"
+                >
+                  + Add layover
+                </button>
+              </div>
+              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200/90">
+                <div className="hidden bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:grid sm:grid-cols-4">
+                  <div className="px-3 py-2">City</div>
+                  <div className="px-3 py-2">Airport</div>
+                  <div className="px-3 py-2">Departure</div>
+                  <div className="px-3 py-2">Arrival</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {layovers.map((l) => (
+                    <div
+                      key={l.id}
+                      className="grid gap-3 bg-white px-3 py-3 sm:grid-cols-4"
+                    >
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
+                          City
+                        </label>
+                        <input
+                          type="text"
+                          value={l.city}
+                          onChange={(e) => updateLayover(l.id, "city", e.target.value)}
+                          className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
+                          Airport
+                        </label>
+                        <input
+                          type="text"
+                          value={l.airport}
+                          onChange={(e) => updateLayover(l.id, "airport", e.target.value)}
+                          className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
+                          Departure
+                        </label>
+                        <TimeInput
+                          id={`layover-departure-${l.id}`}
+                          value={l.departure_time}
+                          onChange={(v) => updateLayover(l.id, "departure_time", v)}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
+                            Arrival
+                          </label>
+                          <TimeInput
+                            id={`layover-arrival-${l.id}`}
+                            value={l.arrival_time}
+                            onChange={(v) => updateLayover(l.id, "arrival_time", v)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeLayover(l.id)}
+                          className="mt-5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-xs text-slate-500 hover:border-rose-200 hover:text-rose-600 sm:mt-0"
+                          aria-label="Remove layover"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Times accept “h:mm AM/PM” and will be stored as 24-hour in Supabase.
+              </p>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6">
+            <header className="border-b border-slate-200/80 pb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">02</p>
+              <h2 className="mt-1 text-base font-semibold text-[#0f172a]">Traveler identity</h2>
+              <p className="mt-1 text-xs text-slate-600">
+                Phone and passport — CRM only; never on the customer itinerary PDF.
+              </p>
+            </header>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-slate-700">Traveler name</label>
+                <input
+                  type="text"
+                  required
+                  value={travelerName}
+                  onChange={(e) => setTravelerName(e.target.value)}
+                  className={fieldClass}
+                />
+              </div>
               <div>
-                <h2 className="text-sm font-semibold text-slate-900">Visa Services</h2>
+                <label className="block text-xs font-medium text-slate-700">Phone number</label>
+                <input
+                  type="tel"
+                  value={travelerPhone}
+                  onChange={(e) => setTravelerPhone(e.target.value)}
+                  autoComplete="tel"
+                  placeholder="+252 ..."
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport / ID number</label>
+                <input
+                  type="text"
+                  value={passportIdNumber}
+                  onChange={(e) => setPassportIdNumber(e.target.value)}
+                  autoComplete="off"
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport issue date</label>
+                <input
+                  type="date"
+                  value={passportIssueDate}
+                  onChange={(e) => setPassportIssueDate(e.target.value)}
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport expiry date</label>
+                <input
+                  type="date"
+                  value={passportExpiryDate}
+                  onChange={(e) => setPassportExpiryDate(e.target.value)}
+                  className={fieldClass}
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-4">
+              <button
+                type="button"
+                onClick={copyPassportToNotes}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-[#0f172a] shadow-sm transition hover:bg-slate-50"
+              >
+                Copy passport to notes
+              </button>
+              <span className="text-[11px] text-slate-500">
+                Appends ID and dates to Notes for quick CRM reference.
+              </span>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6">
+            <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">03</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-semibold text-[#0f172a]">Visa services</h2>
+                  {visaServicesEnabled ? (
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${
+                        visaStatus === "Approved"
+                          ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+                          : visaStatus === "Submitted"
+                            ? "bg-sky-50 text-sky-800 ring-sky-200"
+                            : "bg-amber-50 text-amber-900 ring-amber-200"
+                      }`}
+                    >
+                      {visaStatus}
+                    </span>
+                  ) : null}
+                </div>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Fees roll into total selling price for accounting. Destination may appear on the customer itinerary; passport details never do.
+                  Visa fee rolls into selling price for accounting. Destination may appear on itinerary.
+                  Track status here so your team sees workload at a glance.
                 </p>
               </div>
-              <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700">
+              <label className="inline-flex shrink-0 items-center gap-2 text-xs font-medium text-slate-700">
                 <input
                   type="checkbox"
                   checked={visaServicesEnabled}
                   onChange={(e) => setVisaServicesEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  className="h-4 w-4 rounded border-slate-300 text-[#0f172a] focus:ring-[#0f172a]"
                 />
                 Enable visa services
               </label>
@@ -869,7 +1011,9 @@ export default function NewBookingPage() {
                   </div>
                 ) : null}
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Visa service fee</label>
+                  <label className="block text-xs font-medium text-slate-700">
+                    Visa fee (adds to selling price)
+                  </label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -896,96 +1040,6 @@ export default function NewBookingPage() {
           </section>
 
           <div>
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900">Layovers</h2>
-              <button
-                type="button"
-                onClick={addLayoverRow}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-sky-200 hover:text-sky-700"
-              >
-                + Add layover
-              </button>
-            </div>
-
-            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
-              <div className="hidden bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:grid sm:grid-cols-4">
-                <div className="px-3 py-2">City</div>
-                <div className="px-3 py-2">Airport</div>
-                <div className="px-3 py-2">Departure</div>
-                <div className="px-3 py-2">Arrival</div>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {layovers.map((l) => (
-                  <div
-                    key={l.id}
-                    className="grid gap-3 bg-white px-3 py-3 sm:grid-cols-4"
-                  >
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
-                        City
-                      </label>
-                      <input
-                        type="text"
-                        value={l.city}
-                        onChange={(e) =>
-                          updateLayover(l.id, "city", e.target.value)
-                        }
-                        className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
-                        Airport
-                      </label>
-                      <input
-                        type="text"
-                        value={l.airport}
-                        onChange={(e) =>
-                          updateLayover(l.id, "airport", e.target.value)
-                        }
-                        className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
-                        Departure
-                      </label>
-                      <TimeInput
-                        id={`layover-departure-${l.id}`}
-                        value={l.departure_time}
-                        onChange={(v) => updateLayover(l.id, "departure_time", v)}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500 sm:hidden">
-                          Arrival
-                        </label>
-                        <TimeInput
-                          id={`layover-arrival-${l.id}`}
-                          value={l.arrival_time}
-                          onChange={(v) => updateLayover(l.id, "arrival_time", v)}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeLayover(l.id)}
-                        className="mt-5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-xs text-slate-500 hover:border-rose-200 hover:text-rose-600 sm:mt-0"
-                        aria-label="Remove layover"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <p className="mt-1 text-[11px] text-slate-500">
-              Times accept “h:mm AM/PM” and will be stored as 24-hour in Supabase.
-            </p>
-          </div>
-
-          <div>
             <label className="block text-xs font-medium text-slate-700">
               Notes for traveler (optional)
             </label>
@@ -1009,13 +1063,21 @@ export default function NewBookingPage() {
                   {submitError}
                 </div>
               ) : null}
-              <button
-                type="submit"
-                disabled={saving}
-                className="inline-flex items-center justify-center rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {saving ? "Saving booking..." : "Save booking"}
-              </button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                <Link
+                  href="/dashboard"
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-medium text-[#0f172a] shadow-sm transition hover:bg-slate-50"
+                >
+                  Cancel
+                </Link>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center justify-center rounded-lg bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {saving ? "Saving booking..." : "Save booking"}
+                </button>
+              </div>
             </div>
           </div>
         </form>

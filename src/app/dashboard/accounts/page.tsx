@@ -38,6 +38,15 @@ function maskAccountNumber(raw: string | null | undefined): string {
   return `****${digits.slice(-4)}`;
 }
 
+/** Hormoud / M-Pesa → mobile; Salaam / Premier / Dahabshiil → bank; Cash → cash. */
+function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" | "card" {
+  const s = provider.toLowerCase();
+  if (s.includes("cash")) return "cash";
+  if (s.includes("hormoud") || s.includes("m-pesa") || s.includes("mpesa")) return "mobile";
+  if (s.includes("salaam") || s.includes("premier") || s.includes("dahabshiil")) return "bank";
+  return "bank";
+}
+
 function resolveDisplayCategory(account: Account): string | null {
   if (account.account_category) return account.account_category;
   const parts = (account.type || "").split("·").map((s) => s.trim());
@@ -93,6 +102,15 @@ function getCategoryTheme(category: string | null | undefined) {
         icon: "bank" as const,
       };
   }
+}
+
+/** Digital wallet colors: bank → blue, mobile → purple, cash → green (provider wins over stored category). */
+function walletThemeFromProvider(displayProvider: string, category: string | null) {
+  const rail = railIconForProviderLabel(displayProvider);
+  if (rail === "cash") return getCategoryTheme("Cash");
+  if (rail === "mobile") return getCategoryTheme("Mobile Money");
+  if (rail === "bank") return getCategoryTheme("Bank Account");
+  return getCategoryTheme(category);
 }
 
 function CardIcon({ kind }: { kind: "cash" | "bank" | "mobile" | "card" }) {
@@ -348,10 +366,11 @@ export default function AccountsPage() {
                 GARASHO
               </p>
               <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Treasury &amp; liquidity
+                Digital wallet
               </h1>
               <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                A unified view of rails, balances, and operating cash—built for agency finance teams.
+                Bank (blue), mobile money (purple), and cash (green) rails—balances, masked references, and
+                liquidity in one place.
               </p>
             </div>
 
@@ -416,13 +435,13 @@ export default function AccountsPage() {
         ) : (
           <ul className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {accounts.map((account) => {
-              const theme = getCategoryTheme(resolveDisplayCategory(account));
               const displayProvider =
                 account.provider?.trim() ||
                 ((account.type || "").includes("·")
                   ? (account.type || "").split("·")[0]!.trim()
                   : account.type) ||
                 "—";
+              const theme = walletThemeFromProvider(displayProvider, resolveDisplayCategory(account));
               return (
                 <li key={account.id}>
                   <article
@@ -430,7 +449,7 @@ export default function AccountsPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className={`rounded-full p-2 ${theme.chip} ring-1`}>
-                        <CardIcon kind={theme.icon} />
+                        <CardIcon kind={railIconForProviderLabel(displayProvider)} />
                       </div>
                       <span
                         className={`max-w-[55%] truncate rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1 ${theme.chip}`}
@@ -444,18 +463,18 @@ export default function AccountsPage() {
                     <p className={`mt-1 text-xs font-medium ${theme.accent} opacity-90`}>
                       {displayProvider}
                     </p>
-                    <div className="mt-6 flex flex-1 flex-col justify-end">
+                    <p className="mt-4 font-mono text-sm tracking-[0.12em] text-white/80">
+                      {maskAccountNumber(account.account_number)}
+                    </p>
+                    <div className="mt-5 flex flex-1 flex-col justify-end border-t border-white/10 pt-4">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
-                        Available balance
+                        Balance
                       </p>
                       <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
                         ${account.balance.toLocaleString(undefined, {
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 2,
                         })}
-                      </p>
-                      <p className="mt-4 font-mono text-sm tracking-wider text-white/65">
-                        {maskAccountNumber(account.account_number)}
                       </p>
                     </div>
                   </article>
@@ -489,7 +508,7 @@ export default function AccountsPage() {
           >
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-600">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
                   GARASHO
                 </p>
                 <h2 id={modalTitleId} className="mt-1 text-xl font-semibold text-slate-900">
@@ -526,7 +545,7 @@ export default function AccountsPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">Provider</label>
+                  <label className="block text-xs font-medium text-slate-700">Provider name</label>
                   <select
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}

@@ -28,7 +28,7 @@ export function BackButton({
     <button
       type="button"
       onClick={handleClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg text-sm font-medium text-sky-700 transition hover:bg-sky-50 hover:text-sky-800 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-lg text-sm font-medium text-[#0f172a] transition hover:bg-slate-100 hover:text-slate-900 ${className}`}
     >
       <span aria-hidden className="text-base leading-none">
         ←

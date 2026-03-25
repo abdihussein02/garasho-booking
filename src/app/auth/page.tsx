@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -46,8 +47,8 @@ export default function AuthPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg shadow-slate-200">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-500">
-          GARASHO Booking
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
+          GARASHO · Prime Time
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
           {mode === "login" ? "Welcome back" : "Create your agency account"}
@@ -122,17 +123,25 @@ export default function AuthPage() {
             <p className="text-xs font-medium text-red-600">{error}</p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex w-full items-center justify-center rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {loading
-              ? "Please wait..."
-              : mode === "login"
-              ? "Login"
-              : "Create account"}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <Link
+              href="/"
+              className="flex flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-[#0f172a] shadow-sm transition hover:bg-slate-50"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex flex-1 items-center justify-center rounded-lg bg-[#0f172a] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {loading
+                ? "Please wait..."
+                : mode === "login"
+                  ? "Login"
+                  : "Create account"}
+            </button>
+          </div>
 
           <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
             Authentication is powered by Supabase. Make sure you have{" "}
