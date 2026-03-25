@@ -183,7 +183,7 @@ export default function NewBookingPage() {
   const [flightNumber, setFlightNumber] = useState("");
   const [departureCity, setDepartureCity] = useState("");
   const [destinationCity, setDestinationCity] = useState("");
-  const [travelDate, setTravelDate] = useState("");
+  const [departureDate, setDepartureDate] = useState("");
   const [departureTime, setDepartureTime] = useState("");
   const [arrivalTime, setArrivalTime] = useState("");
   const [includePrice, setIncludePrice] = useState(true);
@@ -296,7 +296,7 @@ export default function NewBookingPage() {
         selling_price: sellingPriceForDb,
         airline_name: airlineName,
         flight_number: flightNumber,
-        travel_date: travelDate,
+        departure_date: departureDate,
         include_price: includePrice,
         payment_method: paymentMethod,
         deposit_account_id: depositAccountId || null,
@@ -327,12 +327,11 @@ export default function NewBookingPage() {
             passport_issue_date: passportIssueDate || null,
             passport_expiry_date: passportExpiryDate || null,
             destination: destinationCity,
-            departure_date: travelDate,
+            departure_date: departureDate,
             return_date: null,
             notes,
             departure_city: departureCity,
             destination_city: destinationCity,
-            travel_date: travelDate,
             departure_time: dep24,
             arrival_time: arr24,
             airline_name: airlineName,
@@ -360,7 +359,7 @@ export default function NewBookingPage() {
           .insert({
             traveler_name: travelerName,
             destination: destinationCity,
-            departure_date: travelDate,
+            departure_date: departureDate,
             return_date: null,
             notes,
           })
@@ -464,7 +463,7 @@ export default function NewBookingPage() {
     addLine("Traveler", travelerName);
     addLine("From", departureCity);
     addLine("To", destinationCity);
-    addLine("Travel date", travelDate);
+    addLine("Departure date", departureDate);
     addLine("Depart", formatTimeTo12h(parseTimeTo24h(departureTime) ?? departureTime));
     addLine("Arrive", formatTimeTo12h(parseTimeTo24h(arrivalTime) ?? arrivalTime));
     addLine("Airline", airlineName);
@@ -671,13 +670,13 @@ export default function NewBookingPage() {
 
               <div>
                 <label className="block text-xs font-medium text-slate-700">
-                  Travel date
+                  Departure date
                 </label>
                 <input
                   type="date"
                   required
-                  value={travelDate}
-                  onChange={(e) => setTravelDate(e.target.value)}
+                  value={departureDate}
+                  onChange={(e) => setDepartureDate(e.target.value)}
                   className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
                 />
               </div>

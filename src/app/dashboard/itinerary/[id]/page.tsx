@@ -12,7 +12,7 @@ type Booking = {
   flight_number: string | null;
   departure_city: string | null;
   destination_city: string | null;
-  travel_date: string | null;
+  departure_date: string | null;
   departure_time: string | null;
   arrival_time: string | null;
   notes: string | null;
@@ -39,7 +39,7 @@ function mapLegacyItinerary(row: LegacyItineraryRow): Booking {
     flight_number: null,
     departure_city: null,
     destination_city: row.destination,
-    travel_date: row.departure_date,
+    departure_date: row.departure_date,
     departure_time: null,
     arrival_time: null,
     notes: row.notes,
@@ -63,7 +63,7 @@ export default function ItineraryPage() {
         const primary = await supabase
           .from("bookings")
           .select(
-            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price, visa_services_enabled, visa_destination, visa_status"
+            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, departure_date, departure_time, arrival_time, notes, include_price, selling_price, visa_services_enabled, visa_destination, visa_status"
           )
           .eq("id", params.id)
           .single();
@@ -76,7 +76,7 @@ export default function ItineraryPage() {
         const withoutVisaCols = await supabase
           .from("bookings")
           .select(
-            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price"
+            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, departure_date, departure_time, arrival_time, notes, include_price, selling_price"
           )
           .eq("id", params.id)
           .single();
@@ -155,7 +155,7 @@ export default function ItineraryPage() {
             <span className="absolute -start-2 mt-1.5 h-3 w-3 rounded-full bg-sky-600" />
             <h3 className="text-sm font-semibold text-slate-900">Schedule</h3>
             <p className="mt-1 text-sm text-slate-700">
-              Date: {booking.travel_date || "-"} | Departure: {booking.departure_time || "-"} | Arrival:{" "}
+              Date: {booking.departure_date || "-"} | Departure: {booking.departure_time || "-"} | Arrival:{" "}
               {booking.arrival_time || "-"}
             </p>
           </li>

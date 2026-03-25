@@ -11,7 +11,6 @@ type Booking = {
   destination: string | null;
   destination_city: string | null;
   departure_date: string | null;
-  travel_date: string | null;
   selling_price: number | null;
   net_cost: number | null;
   include_price: boolean | null;
@@ -57,9 +56,9 @@ export default function DashboardPage() {
         const primaryQuery = await supabase
           .from("bookings")
           .select(
-            "id, traveler_name, destination, destination_city, departure_date, travel_date, selling_price, net_cost, include_price, status"
+            "id, traveler_name, destination, destination_city, departure_date, selling_price, net_cost, include_price, status"
           )
-          .order("travel_date", { ascending: true, nullsFirst: false });
+          .order("departure_date", { ascending: true, nullsFirst: false });
 
         let rows: Booking[] = [];
 
@@ -82,7 +81,6 @@ export default function DashboardPage() {
             destination: row.destination,
             destination_city: null,
             departure_date: row.departure_date,
-            travel_date: null,
             selling_price: null,
             net_cost: null,
             include_price: null,
@@ -91,8 +89,8 @@ export default function DashboardPage() {
         }
 
         rows.sort((a, b) => {
-          const aDate = a.travel_date || a.departure_date;
-          const bDate = b.travel_date || b.departure_date;
+          const aDate = a.departure_date;
+          const bDate = b.departure_date;
           if (!aDate && !bDate) return 0;
           if (!aDate) return 1;
           if (!bDate) return -1;
@@ -119,8 +117,8 @@ export default function DashboardPage() {
     return booking.destination_city || booking.destination || "-";
   }
 
-  function getTravelDate(booking: Booking) {
-    return booking.travel_date || booking.departure_date || "-";
+  function getDepartureDateDisplay(booking: Booking) {
+    return booking.departure_date || "-";
   }
 
   function formatCurrency(value: number | null) {
@@ -138,7 +136,7 @@ export default function DashboardPage() {
   const currentYear = now.getFullYear();
 
   const salesThisMonth = bookings.reduce((sum, booking) => {
-    const dateString = booking.travel_date || booking.departure_date;
+    const dateString = booking.departure_date;
     if (!dateString || booking.selling_price === null) return sum;
     const d = new Date(dateString);
     if (Number.isNaN(d.getTime())) return sum;
@@ -316,7 +314,7 @@ export default function DashboardPage() {
                         {getDestination(b)}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {getTravelDate(b)}
+                        {getDepartureDateDisplay(b)}
                       </td>
                       <td className="px-4 py-3">
                         <span
