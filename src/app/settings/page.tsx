@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { BackButton } from "@/components/BackButton";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 export default function SettingsPage() {
@@ -40,9 +41,8 @@ export default function SettingsPage() {
       // Optional: persist to Supabase agencies table if you have one
       await supabase.rpc("upsert_agency_profile", {
         name: agencyName,
-      }).catch(() => {
-        // Procedure is optional; ignore if it does not exist
       });
+      // Ignore RPC errors — procedure is optional and may not exist.
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem("agency_name", agencyName);
@@ -56,6 +56,7 @@ export default function SettingsPage() {
     <main className="flex min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto w-full max-w-3xl rounded-2xl bg-white p-6 shadow-lg shadow-slate-200 sm:p-8">
         <div className="border-b border-slate-100 pb-5">
+          <BackButton className="-ml-1 mb-4 px-2 py-1" />
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
             Agency settings
           </h1>

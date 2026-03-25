@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { BackButton } from "@/components/BackButton";
 import { useParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
@@ -95,9 +95,7 @@ export default function ReceiptPage() {
       <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-start justify-between border-b border-slate-100 pb-4">
           <h1 className="text-xl font-semibold text-slate-900">Professional Receipt</h1>
-          <Link href="/dashboard" className="text-sm font-medium text-sky-700 hover:text-sky-800">
-            Back
-          </Link>
+          <BackButton className="px-2 py-1" />
         </div>
 
         <div className="space-y-3 text-sm text-slate-700">

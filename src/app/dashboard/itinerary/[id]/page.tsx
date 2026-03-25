@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { BackButton } from "@/components/BackButton";
 import { useParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
@@ -128,9 +128,7 @@ export default function ItineraryPage() {
             <h1 className="text-xl font-semibold text-slate-900">Professional Itinerary</h1>
             <p className="mt-1 text-sm text-slate-600">Booking ID: {booking.id}</p>
           </div>
-          <Link href="/dashboard" className="text-sm font-medium text-sky-700 hover:text-sky-800">
-            Back
-          </Link>
+          <BackButton className="px-2 py-1" />
         </div>
 
         <ol className="relative border-s border-slate-200 ps-5">

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import { BackButton } from "@/components/BackButton";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 type Account = {
@@ -113,9 +113,7 @@ export default function AccountsPage() {
             <h2 className="text-xl font-semibold text-slate-900">Accounts Management</h2>
             <p className="mt-1 text-sm text-slate-600">Create and track operational accounts by provider.</p>
           </div>
-          <Link href="/dashboard" className="text-sm font-medium text-sky-700 hover:text-sky-800">
-            Back
-          </Link>
+          <BackButton className="px-2 py-1" />
         </div>
 
         <form onSubmit={handleAddAccount} className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">

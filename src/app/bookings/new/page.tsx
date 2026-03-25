@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { BackButton } from "@/components/BackButton";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import jsPDF from "jspdf";
@@ -372,6 +373,11 @@ export default function NewBookingPage() {
 
       if (error) throw error;
 
+      const bookingId = booking?.id;
+      if (!bookingId) {
+        throw new Error("Booking was saved but no id was returned.");
+      }
+
       if (depositAccountId && sellingPriceForDb !== null) {
         const { error: incrementError } = await supabase.rpc(
           "increment_bank_account_balance",
@@ -395,7 +401,7 @@ export default function NewBookingPage() {
         const layoverRows = filteredLayovers.map((l) => ({
           // Store as "HH:MM:SS" (24-hour) to keep consistency in DB.
           // If the user typed invalid values, store raw strings so data isn't lost.
-          booking_id: booking.id,
+          booking_id: bookingId,
           city: l.city,
           airport: l.airport,
           departure_time: parseTimeTo24h(l.departure_time) ?? l.departure_time,
@@ -521,22 +527,25 @@ export default function NewBookingPage() {
   return (
     <main className="flex min-h-screen bg-slate-50 px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-6 shadow-lg shadow-slate-200 sm:p-8">
-        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-              New booking
-            </h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Capture traveler details, flights, and layovers in one place.
-            </p>
+        <div className="flex flex-col gap-4 border-b border-slate-100 pb-5">
+          <BackButton className="-ml-1 px-2 py-1" />
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+                New booking
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Capture traveler details, flights, and layovers in one place.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
+            >
+              Print itinerary (PDF)
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
-          >
-            Print itinerary (PDF)
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
