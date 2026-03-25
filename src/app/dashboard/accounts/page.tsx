@@ -21,14 +21,13 @@ type Account = {
   name: string;
   type: string;
   balance: number;
-  provider: string | null;
-  account_category: string | null;
+  provider_name: string | null;
   account_number: string | null;
 };
 
 function displayProviderName(account: Account): string {
   return (
-    account.provider?.trim() ||
+    account.provider_name?.trim() ||
     ((account.type || "").includes("·")
       ? (account.type || "").split("·")[0]!.trim()
       : account.type) ||
@@ -57,7 +56,6 @@ function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" 
 const LEGACY_CATEGORIES = ["Mobile Money", "Bank Account", "Visa/Mastercard", "Cash"] as const;
 
 function resolveDisplayCategory(account: Account): string | null {
-  if (account.account_category) return account.account_category;
   const parts = (account.type || "").split("·").map((s) => s.trim());
   if (
     parts.length >= 2 &&
@@ -68,10 +66,8 @@ function resolveDisplayCategory(account: Account): string | null {
   return null;
 }
 
-/** Prefer stored category so card color matches Type (Bank / Mobile / Cash). */
+/** Rail category from `type` ("Provider · Category") for card color (Bank / Mobile / Cash). */
 function resolveAccountKind(account: Account): "Bank Account" | "Mobile Money" | "Cash" | null {
-  const c = account.account_category?.trim();
-  if (c === "Bank Account" || c === "Mobile Money" || c === "Cash") return c;
   const fromType = resolveDisplayCategory(account);
   if (fromType === "Bank Account" || fromType === "Mobile Money" || fromType === "Cash") return fromType;
   return null;
@@ -257,23 +253,21 @@ function railDbValue(rail: RailUi): "Bank Account" | "Mobile Money" | "Cash" {
   return RAIL_OPTIONS.find((o) => o.value === rail)!.db;
 }
 
-/** Map DB row to UI account (`current_balance` column → local `balance` for display). */
+/** Map DB row to UI account (`current_balance` → local `balance` for display). */
 function rowToAccount(row: Record<string, unknown>): Account {
-  const raw =
-    row.current_balance != null
-      ? row.current_balance
-      : row.balance != null
-        ? row.balance
-        : 0;
+  const raw = row.current_balance != null ? row.current_balance : 0;
   return {
     id: String(row.id),
     name: String(row.name ?? ""),
     type: String(row.type ?? "Account"),
     balance: Number(raw) || 0,
-    provider: (row.provider as string | null) ?? null,
-    account_category: (row.account_category as string | null) ?? null,
+    provider_name: (row.provider_name as string | null) ?? (row.provider as string | null) ?? null,
     account_number: (row.account_number as string | null) ?? null,
   };
+}
+
+function isSchemaCacheOrStaleColumnError(message: string | undefined): boolean {
+  return /schema cache|could not find|does not exist|PGRST204/i.test(message || "");
 }
 
 export default function AccountsPage() {
@@ -295,10 +289,15 @@ export default function AccountsPage() {
     const supabase = getSupabaseBrowserClient();
     await supabase.auth.refreshSession().catch(() => {});
 
-    const res = await supabase
-      .from("banking_accounts")
-      .select("id, name, type, current_balance, provider, account_category, account_number")
-      .order("name", { ascending: true });
+    const selectList = "id, name, type, current_balance, provider_name, account_number";
+    const runSelect = () =>
+      supabase.from("banking_accounts").select(selectList).order("name", { ascending: true });
+
+    let res = await runSelect();
+    if (res.error && isSchemaCacheOrStaleColumnError(res.error.message)) {
+      await new Promise((r) => setTimeout(r, 200));
+      res = await runSelect();
+    }
 
     if (res.error) throw res.error;
     const rows = (res.data as unknown as Record<string, unknown>[]) ?? [];
@@ -362,8 +361,7 @@ export default function AccountsPage() {
         name: accountName,
         type: typeDisplay,
         current_balance: parsedBalance,
-        provider: providerLabel,
-        account_category: accountCategoryDb,
+        provider_name: providerLabel,
         account_number: acctNum,
       };
 
@@ -391,8 +389,7 @@ export default function AccountsPage() {
         const { error: patchErr } = await supabase
           .from("banking_accounts")
           .update({
-            provider: providerLabel,
-            account_category: accountCategoryDb,
+            provider_name: providerLabel,
             account_number: acctNum,
           })
           .eq("id", rowId);
