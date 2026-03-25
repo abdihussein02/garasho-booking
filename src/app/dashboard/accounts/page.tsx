@@ -374,6 +374,7 @@ export default function AccountsPage() {
             name: accountName,
             type: typeDisplay,
             current_balance: parsedBalance,
+            provider_name: providerLabel,
           })
           .select("id")
           .single();
