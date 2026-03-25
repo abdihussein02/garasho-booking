@@ -145,9 +145,12 @@ type BankingAccount = {
   balance: number | null;
 };
 
-function createEmptyLayover(): Layover {
+/** Stable id for the first row so server and client markup match during hydration. */
+const INITIAL_LAYOVER_ROW_ID = "layover-row-initial";
+
+function createEmptyLayover(stableId?: string): Layover {
   return {
-    id: crypto.randomUUID(),
+    id: stableId ?? crypto.randomUUID(),
     city: "",
     airport: "",
     departure_time: "",
@@ -155,8 +158,26 @@ function createEmptyLayover(): Layover {
   };
 }
 
+const VISA_DESTINATIONS = [
+  "Kenya",
+  "Turkey",
+  "Saudi",
+  "UAE",
+  "Egypt",
+  "Other",
+] as const;
+
 export default function NewBookingPage() {
   const [travelerName, setTravelerName] = useState("");
+  const [travelerPhone, setTravelerPhone] = useState("");
+  const [passportIdNumber, setPassportIdNumber] = useState("");
+  const [passportIssueDate, setPassportIssueDate] = useState("");
+  const [passportExpiryDate, setPassportExpiryDate] = useState("");
+  const [visaServicesEnabled, setVisaServicesEnabled] = useState(false);
+  const [visaDestination, setVisaDestination] = useState("");
+  const [visaDestinationOther, setVisaDestinationOther] = useState("");
+  const [visaServiceFee, setVisaServiceFee] = useState("");
+  const [visaStatus, setVisaStatus] = useState("Pending");
   const [airlineName, setAirlineName] = useState("");
   const [flightNumber, setFlightNumber] = useState("");
   const [departureCity, setDepartureCity] = useState("");
@@ -170,16 +191,14 @@ export default function NewBookingPage() {
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [depositAccountId, setDepositAccountId] = useState("");
   const [bankingAccounts, setBankingAccounts] = useState<BankingAccount[]>([]);
-  const [layovers, setLayovers] = useState<Layover[]>([]);
+  const [layovers, setLayovers] = useState<Layover[]>(() => [
+    createEmptyLayover(INITIAL_LAYOVER_ROW_ID),
+  ]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const router = useRouter();
-
-  useEffect(() => {
-    setLayovers([createEmptyLayover()]);
-  }, []);
 
   useEffect(() => {
     async function loadAccounts() {
@@ -239,21 +258,51 @@ export default function NewBookingPage() {
         throw new Error("Selling price must be a number.");
       }
 
+      let parsedVisaFee: number | null = null;
+      if (visaServicesEnabled && visaServiceFee.trim()) {
+        parsedVisaFee = Number(visaServiceFee.replace(/[^0-9.]/g, ""));
+        if (Number.isNaN(parsedVisaFee)) {
+          throw new Error("Visa service fee must be a number.");
+        }
+      }
+
+      const resolvedVisaDestination =
+        visaDestination === "Other" ? visaDestinationOther.trim() : visaDestination.trim();
+
+      if (visaServicesEnabled) {
+        if (!resolvedVisaDestination) {
+          throw new Error("Select a visa destination or enter a country for “Other”.");
+        }
+      }
+
+      const tripSelling = parsedSellingPrice ?? 0;
+      const visaAmount = visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : 0;
+      const totalSellingPrice = tripSelling + visaAmount;
+      const sellingPriceForDb = totalSellingPrice > 0 ? totalSellingPrice : null;
+
       // Try inserting with the newer flight info fields first.
       const bookingPayload = {
         traveler_name: travelerName,
+        traveler_phone: travelerPhone.trim() || null,
+        passport_id_number: passportIdNumber.trim() || null,
+        passport_issue_date: passportIssueDate || null,
+        passport_expiry_date: passportExpiryDate || null,
         departure_city: departureCity,
         destination_city: destinationCity,
         departure_time: dep24,
         arrival_time: arr24,
         net_cost: parsedNetCost,
-        selling_price: parsedSellingPrice,
+        selling_price: sellingPriceForDb,
         airline_name: airlineName,
         flight_number: flightNumber,
         travel_date: travelDate,
         include_price: includePrice,
         payment_method: paymentMethod,
         deposit_account_id: depositAccountId || null,
+        visa_services_enabled: visaServicesEnabled,
+        visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
+        visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
+        visa_status: visaServicesEnabled ? visaStatus : null,
         notes,
       };
 
@@ -272,6 +321,10 @@ export default function NewBookingPage() {
           .from("bookings")
           .insert({
             traveler_name: travelerName,
+            traveler_phone: travelerPhone.trim() || null,
+            passport_id_number: passportIdNumber.trim() || null,
+            passport_issue_date: passportIssueDate || null,
+            passport_expiry_date: passportExpiryDate || null,
             destination: destinationCity,
             departure_date: travelDate,
             return_date: null,
@@ -284,10 +337,14 @@ export default function NewBookingPage() {
             airline_name: airlineName,
             flight_number: flightNumber,
             net_cost: parsedNetCost,
-            selling_price: parsedSellingPrice,
+            selling_price: sellingPriceForDb,
             include_price: includePrice,
             payment_method: paymentMethod,
             deposit_account_id: depositAccountId || null,
+            visa_services_enabled: visaServicesEnabled,
+            visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
+            visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
+            visa_status: visaServicesEnabled ? visaStatus : null,
           })
           .select("id")
           .single();
@@ -315,12 +372,12 @@ export default function NewBookingPage() {
 
       if (error) throw error;
 
-      if (depositAccountId && parsedSellingPrice !== null) {
+      if (depositAccountId && sellingPriceForDb !== null) {
         const { error: incrementError } = await supabase.rpc(
           "increment_bank_account_balance",
           {
             p_account_id: depositAccountId,
-            p_amount: parsedSellingPrice,
+            p_amount: sellingPriceForDb,
           }
         );
         if (incrementError) throw incrementError;
@@ -407,7 +464,16 @@ export default function NewBookingPage() {
     addLine("Airline", airlineName);
     addLine("Flight no.", flightNumber);
     if (includePrice) {
-      addLine("Price", sellingPrice);
+      const tripNum = sellingPrice.trim()
+        ? Number(sellingPrice.replace(/[^0-9.]/g, ""))
+        : 0;
+      const visaNum =
+        visaServicesEnabled && visaServiceFee.trim()
+          ? Number(visaServiceFee.replace(/[^0-9.]/g, ""))
+          : 0;
+      const total =
+        (Number.isNaN(tripNum) ? 0 : tripNum) + (Number.isNaN(visaNum) ? 0 : visaNum);
+      addLine("Price", total > 0 ? String(total) : sellingPrice);
     }
 
     if (notes) {
@@ -500,6 +566,54 @@ export default function NewBookingPage() {
               />
             </div>
           </div>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+            <h2 className="text-sm font-semibold text-slate-900">Traveler Identity</h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Stored securely for CRM; not shown on the customer-facing itinerary.
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Phone number</label>
+                <input
+                  type="tel"
+                  value={travelerPhone}
+                  onChange={(e) => setTravelerPhone(e.target.value)}
+                  autoComplete="tel"
+                  placeholder="+252 ..."
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport / ID number</label>
+                <input
+                  type="text"
+                  value={passportIdNumber}
+                  onChange={(e) => setPassportIdNumber(e.target.value)}
+                  autoComplete="off"
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport issue date</label>
+                <input
+                  type="date"
+                  value={passportIssueDate}
+                  onChange={(e) => setPassportIssueDate(e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">Passport expiry date</label>
+                <input
+                  type="date"
+                  value={passportExpiryDate}
+                  onChange={(e) => setPassportExpiryDate(e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                />
+              </div>
+            </div>
+          </section>
 
           <div>
             <div className="flex items-center justify-between">
@@ -630,6 +744,9 @@ export default function NewBookingPage() {
                       placeholder="e.g. 1250"
                       className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
                     />
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Visa service fees (below) are added to this for the recorded total and banking deposit.
+                    </p>
                   </div>
                 </div>
                 <div className="mt-4 border-t border-slate-200 pt-4">
@@ -677,6 +794,82 @@ export default function NewBookingPage() {
               </div>
             </div>
           </div>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Visa Services</h2>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Fees roll into total selling price for accounting. Destination may appear on the customer itinerary; passport details never do.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={visaServicesEnabled}
+                  onChange={(e) => setVisaServicesEnabled(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                Enable visa services
+              </label>
+            </div>
+            {visaServicesEnabled ? (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Destination</label>
+                  <select
+                    required={visaServicesEnabled}
+                    value={visaDestination}
+                    onChange={(e) => setVisaDestination(e.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  >
+                    <option value="">Select country</option>
+                    {VISA_DESTINATIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {visaDestination === "Other" ? (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700">Other country</label>
+                    <input
+                      type="text"
+                      required={visaServicesEnabled && visaDestination === "Other"}
+                      value={visaDestinationOther}
+                      onChange={(e) => setVisaDestinationOther(e.target.value)}
+                      placeholder="Country name"
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                    />
+                  </div>
+                ) : null}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Visa service fee</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={visaServiceFee}
+                    onChange={(e) => setVisaServiceFee(e.target.value)}
+                    placeholder="e.g. 150"
+                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Status</label>
+                  <select
+                    value={visaStatus}
+                    onChange={(e) => setVisaStatus(e.target.value)}
+                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Submitted">Submitted</option>
+                    <option value="Approved">Approved</option>
+                  </select>
+                </div>
+              </div>
+            ) : null}
+          </section>
 
           <div>
             <div className="flex items-center justify-between">

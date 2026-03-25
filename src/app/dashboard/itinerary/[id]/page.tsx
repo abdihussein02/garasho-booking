@@ -18,6 +18,9 @@ type Booking = {
   notes: string | null;
   include_price: boolean | null;
   selling_price: number | null;
+  visa_services_enabled: boolean | null;
+  visa_destination: string | null;
+  visa_status: string | null;
 };
 
 type LegacyItineraryRow = {
@@ -42,6 +45,9 @@ function mapLegacyItinerary(row: LegacyItineraryRow): Booking {
     notes: row.notes,
     include_price: false,
     selling_price: null,
+    visa_services_enabled: false,
+    visa_destination: null,
+    visa_status: null,
   };
 }
 
@@ -57,13 +63,31 @@ export default function ItineraryPage() {
         const primary = await supabase
           .from("bookings")
           .select(
-            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price"
+            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price, visa_services_enabled, visa_destination, visa_status"
           )
           .eq("id", params.id)
           .single();
 
         if (!primary.error && primary.data) {
           setBooking(primary.data as Booking);
+          return;
+        }
+
+        const withoutVisaCols = await supabase
+          .from("bookings")
+          .select(
+            "id, traveler_name, airline_name, flight_number, departure_city, destination_city, travel_date, departure_time, arrival_time, notes, include_price, selling_price"
+          )
+          .eq("id", params.id)
+          .single();
+
+        if (!withoutVisaCols.error && withoutVisaCols.data) {
+          setBooking({
+            ...(withoutVisaCols.data as Booking),
+            visa_services_enabled: false,
+            visa_destination: null,
+            visa_status: null,
+          });
           return;
         }
 
@@ -143,6 +167,21 @@ export default function ItineraryPage() {
               <h3 className="text-sm font-semibold text-slate-900">Price</h3>
               <p className="mt-1 text-sm text-slate-700">
                 {booking.selling_price !== null ? `$${booking.selling_price.toLocaleString()}` : "-"}
+              </p>
+              {booking.visa_services_enabled ? (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Total may include visa service fees where applicable.
+                </p>
+              ) : null}
+            </li>
+          ) : null}
+          {booking.visa_services_enabled ? (
+            <li className="mb-8 ms-2">
+              <span className="absolute -start-2 mt-1.5 h-3 w-3 rounded-full bg-sky-600" />
+              <h3 className="text-sm font-semibold text-slate-900">Visa services</h3>
+              <p className="mt-1 text-sm text-slate-700">
+                Destination: {booking.visa_destination || "-"}
+                {booking.visa_status ? ` · Status: ${booking.visa_status}` : ""}
               </p>
             </li>
           ) : null}

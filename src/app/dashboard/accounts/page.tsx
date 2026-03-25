@@ -11,13 +11,15 @@ type Account = {
   balance: number;
 };
 
+const DEFAULT_PROVIDER_TYPE = "Hormoud EVC Plus";
+
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [type, setType] = useState("Bank");
+  const [type, setType] = useState(DEFAULT_PROVIDER_TYPE);
   const [startingBalance, setStartingBalance] = useState("");
 
   async function loadAccounts() {
@@ -67,7 +69,7 @@ export default function AccountsPage() {
       if (error) throw error;
 
       setName("");
-      setType("Bank");
+      setType(DEFAULT_PROVIDER_TYPE);
       setStartingBalance("");
       await loadAccounts();
     } catch (error) {
