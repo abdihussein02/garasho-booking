@@ -21,13 +21,14 @@ type Account = {
   name: string;
   type: string;
   balance: number;
-  provider_name: string | null;
+  provider: string | null;
+  account_category: string | null;
   account_number: string | null;
 };
 
 function displayProviderName(account: Account): string {
   return (
-    account.provider_name?.trim() ||
+    account.provider?.trim() ||
     ((account.type || "").includes("·")
       ? (account.type || "").split("·")[0]!.trim()
       : account.type) ||
@@ -56,6 +57,8 @@ function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" 
 const LEGACY_CATEGORIES = ["Mobile Money", "Bank Account", "Visa/Mastercard", "Cash"] as const;
 
 function resolveDisplayCategory(account: Account): string | null {
+  const stored = account.account_category?.trim();
+  if (stored) return stored;
   const parts = (account.type || "").split("·").map((s) => s.trim());
   if (
     parts.length >= 2 &&
@@ -68,6 +71,9 @@ function resolveDisplayCategory(account: Account): string | null {
 
 /** Rail category from `type` ("Provider · Category") for card color (Bank / Mobile / Cash). */
 function resolveAccountKind(account: Account): "Bank Account" | "Mobile Money" | "Cash" | null {
+  const c = account.account_category?.trim();
+  if (c === "Bank Account" || c === "Mobile Money" || c === "Cash") return c;
+
   const fromType = resolveDisplayCategory(account);
   if (fromType === "Bank Account" || fromType === "Mobile Money" || fromType === "Cash") return fromType;
   return null;
@@ -261,7 +267,8 @@ function rowToAccount(row: Record<string, unknown>): Account {
     name: String(row.name ?? ""),
     type: String(row.type ?? "Account"),
     balance: Number(raw) || 0,
-    provider_name: (row.provider_name as string | null) ?? (row.provider as string | null) ?? null,
+    provider: (row.provider as string | null) ?? null,
+    account_category: (row.account_category as string | null) ?? null,
     account_number: (row.account_number as string | null) ?? null,
   };
 }
@@ -289,7 +296,8 @@ export default function AccountsPage() {
     const supabase = getSupabaseBrowserClient();
     await supabase.auth.refreshSession().catch(() => {});
 
-    const selectList = "id, name, type, current_balance, provider_name, account_number";
+    const selectList =
+      "id, name, type, current_balance, provider, account_category, account_number";
     const runSelect = () =>
       supabase.from("banking_accounts").select(selectList).order("name", { ascending: true });
 
@@ -361,7 +369,8 @@ export default function AccountsPage() {
         name: accountName,
         type: typeDisplay,
         current_balance: parsedBalance,
-        provider_name: providerLabel,
+        provider: providerLabel,
+        account_category: accountCategoryDb,
         account_number: acctNum,
       };
 
@@ -374,7 +383,8 @@ export default function AccountsPage() {
             name: accountName,
             type: typeDisplay,
             current_balance: parsedBalance,
-            provider_name: providerLabel,
+            provider: providerLabel,
+            account_category: accountCategoryDb,
           })
           .select("id")
           .single();
@@ -390,7 +400,8 @@ export default function AccountsPage() {
         const { error: patchErr } = await supabase
           .from("banking_accounts")
           .update({
-            provider_name: providerLabel,
+            provider: providerLabel,
+            account_category: accountCategoryDb,
             account_number: acctNum,
           })
           .eq("id", rowId);
