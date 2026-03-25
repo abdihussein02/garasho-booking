@@ -359,6 +359,8 @@ export default function NewBookingPage() {
       let error = insertPrimary.error;
 
       // Fallback chain: preserve as much user data as possible across schema versions.
+      // Only the primary insert uses `deposit_to_id`. All fallbacks use `deposit_account_id` so
+      // databases without `deposit_to_id` still save the booking and link the deposit.
       if (error) {
         const fallbackLegacyDeposit = await supabase
           .from("bookings")
@@ -396,7 +398,7 @@ export default function NewBookingPage() {
             selling_price: sellingPriceForDb,
             include_price: includePrice,
             payment_method: paymentMethod,
-            deposit_to_id: depositFk,
+            deposit_account_id: depositFk,
             visa_services_enabled: visaServicesEnabled,
             visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
             visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
@@ -407,42 +409,6 @@ export default function NewBookingPage() {
 
         booking = fallbackExtended.data;
         error = fallbackExtended.error;
-      }
-
-      if (error) {
-        const fallbackExtendedLegacyDeposit = await supabase
-          .from("bookings")
-          .insert({
-            traveler_name: travelerName,
-            traveler_phone: travelerPhone.trim() || null,
-            passport_id_number: passportIdNumber.trim() || null,
-            passport_issue_date: passportIssueDate || null,
-            passport_expiry_date: passportExpiryDate || null,
-            destination: destinationCity,
-            departure_date: departureDate,
-            return_date: null,
-            notes,
-            departure_city: departureCity,
-            destination_city: destinationCity,
-            departure_time: dep24,
-            arrival_time: arr24,
-            airline_name: airlineName,
-            flight_number: flightNumber,
-            net_cost: parsedNetCost,
-            selling_price: sellingPriceForDb,
-            include_price: includePrice,
-            payment_method: paymentMethod,
-            deposit_account_id: depositFk,
-            visa_services_enabled: visaServicesEnabled,
-            visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
-            visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
-            visa_status: visaServicesEnabled ? visaStatus : null,
-          })
-          .select("id")
-          .single();
-
-        booking = fallbackExtendedLegacyDeposit.data;
-        error = fallbackExtendedLegacyDeposit.error;
       }
 
       if (error) {
@@ -790,7 +756,7 @@ export default function NewBookingPage() {
                 </div>
                 <div className="mt-4 border-t border-slate-200 pt-4">
                   <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-                    Payment Details
+                    Payment & deposit
                   </h3>
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
                     <div>
@@ -831,7 +797,8 @@ export default function NewBookingPage() {
                         })}
                       </select>
                       <p className="mt-1 text-[11px] text-slate-500">
-                        Booking saves even if no account is selected.
+                        Links this booking to a bank account in Supabase; optional if you only record
+                        payment method.
                       </p>
                     </div>
                   </div>
@@ -947,7 +914,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Traveler phone</label>
+                <label className="block text-xs font-medium text-slate-700">Phone</label>
                 <input
                   type="tel"
                   value={travelerPhone}
@@ -977,7 +944,7 @@ export default function NewBookingPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700">Passport expiry</label>
+                <label className="block text-xs font-medium text-slate-700">Expiry</label>
                 <input
                   type="date"
                   value={passportExpiryDate}

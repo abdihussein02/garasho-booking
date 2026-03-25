@@ -117,11 +117,11 @@ function getCategoryTheme(category: string | null | undefined) {
       };
     case "Visa/Mastercard":
       return {
-        border: "border-amber-400/55",
-        gradient: "from-amber-600/95 via-orange-800/88 to-slate-950",
-        accent: "text-amber-100",
-        chip: "bg-white/15 text-amber-50 ring-white/20",
-        icon: "card" as const,
+        border: "border-sky-400/50",
+        gradient: "from-sky-600/95 via-blue-800/90 to-slate-950",
+        accent: "text-sky-100",
+        chip: "bg-white/15 text-sky-50 ring-white/20",
+        icon: "bank" as const,
       };
     default:
       return {
@@ -515,9 +515,7 @@ export default function AccountsPage() {
                   />
                 </div>
                 <div className="min-w-[min(100%,10rem)] flex-1">
-                  <label className="block text-[11px] font-medium text-slate-600">
-                    Provider name
-                  </label>
+                  <label className="block text-[11px] font-medium text-slate-600">Provider</label>
                   <select
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}
