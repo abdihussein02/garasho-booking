@@ -2,23 +2,19 @@
 
 import { FormEvent, useEffect, useId, useState } from "react";
 import { BackButton } from "@/components/BackButton";
+import { useToast } from "@/components/providers/ToastProvider";
+import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
-const PROVIDERS = [
-  "Hormoud",
-  "Salaam Bank",
-  "Premier Bank",
-  "M-Pesa",
-  "Dahabshiil",
-  "Cash",
-] as const;
+const PROVIDERS = ["Hormoud", "Salaam", "Premier", "M-Pesa", "Cash"] as const;
 
-const ACCOUNT_CATEGORIES = [
-  "Mobile Money",
-  "Bank Account",
-  "Visa/Mastercard",
-  "Cash",
-] as const;
+type RailUi = "Bank" | "Mobile" | "Cash";
+
+const RAIL_OPTIONS: { label: string; value: RailUi; db: "Bank Account" | "Mobile Money" | "Cash" }[] = [
+  { label: "Bank", value: "Bank", db: "Bank Account" },
+  { label: "Mobile (EVC)", value: "Mobile", db: "Mobile Money" },
+  { label: "Cash", value: "Cash", db: "Cash" },
+];
 
 type Account = {
   id: string;
@@ -47,16 +43,49 @@ function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" 
   return "bank";
 }
 
+const LEGACY_CATEGORIES = ["Mobile Money", "Bank Account", "Visa/Mastercard", "Cash"] as const;
+
 function resolveDisplayCategory(account: Account): string | null {
   if (account.account_category) return account.account_category;
   const parts = (account.type || "").split("·").map((s) => s.trim());
   if (
     parts.length >= 2 &&
-    (ACCOUNT_CATEGORIES as readonly string[]).includes(parts[parts.length - 1]!)
+    (LEGACY_CATEGORIES as readonly string[]).includes(parts[parts.length - 1]! as (typeof LEGACY_CATEGORIES)[number])
   ) {
     return parts[parts.length - 1]!;
   }
   return null;
+}
+
+/** Prefer stored category so card color matches Type (Bank / Mobile / Cash). */
+function resolveAccountKind(account: Account): "Bank Account" | "Mobile Money" | "Cash" | null {
+  const c = account.account_category?.trim();
+  if (c === "Bank Account" || c === "Mobile Money" || c === "Cash") return c;
+  const fromType = resolveDisplayCategory(account);
+  if (fromType === "Bank Account" || fromType === "Mobile Money" || fromType === "Cash") return fromType;
+  return null;
+}
+
+function cardGradientTheme(account: Account, displayProvider: string) {
+  const kind = resolveAccountKind(account);
+  if (kind) return getCategoryTheme(kind);
+  return walletThemeFromProvider(displayProvider, resolveDisplayCategory(account));
+}
+
+function cardIconKind(account: Account, displayProvider: string): "cash" | "bank" | "mobile" | "card" {
+  const kind = resolveAccountKind(account);
+  if (kind === "Cash") return "cash";
+  if (kind === "Mobile Money") return "mobile";
+  if (kind === "Bank Account") return "bank";
+  return railIconForProviderLabel(displayProvider);
+}
+
+function chipLabelForAccount(account: Account): string {
+  const k = resolveAccountKind(account);
+  if (k === "Bank Account") return "Bank";
+  if (k === "Mobile Money") return "Mobile";
+  if (k === "Cash") return "Cash";
+  return resolveDisplayCategory(account) || "Account";
 }
 
 function getCategoryTheme(category: string | null | undefined) {
@@ -209,19 +238,24 @@ function Spinner({ className }: { className?: string }) {
 }
 
 const DEFAULT_PROVIDER = PROVIDERS[0];
-const DEFAULT_CATEGORY = ACCOUNT_CATEGORIES[0];
+const DEFAULT_RAIL: RailUi = "Mobile";
+
+function railDbValue(rail: RailUi): "Bank Account" | "Mobile Money" | "Cash" {
+  return RAIL_OPTIONS.find((o) => o.value === rail)!.db;
+}
 
 export default function AccountsPage() {
-  const modalTitleId = useId();
+  const addFormTitleId = useId();
+  const { toast } = useToast();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addPanelOpen, setAddPanelOpen] = useState(false);
 
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<string>(DEFAULT_PROVIDER);
-  const [accountCategory, setAccountCategory] = useState<string>(DEFAULT_CATEGORY);
+  const [railType, setRailType] = useState<RailUi>(DEFAULT_RAIL);
   const [accountNumber, setAccountNumber] = useState("");
   const [startingBalance, setStartingBalance] = useState("");
 
@@ -270,6 +304,7 @@ export default function AccountsPage() {
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Failed to load accounts.";
         setSubmitError(msg);
+        toast("error", formatSupabaseUserMessage(msg));
       } finally {
         setLoading(false);
       }
@@ -280,12 +315,11 @@ export default function AccountsPage() {
   function validateForm(): string | null {
     if (!name.trim()) return "Please enter an account name.";
     if (!provider.trim()) return "Please select a provider.";
-    if (!accountCategory.trim()) return "Please select an account type.";
     if (!accountNumber.trim()) return "Please enter an account number.";
     const parsedBalance = startingBalance.trim()
       ? Number(startingBalance.replace(/[^0-9.]/g, ""))
       : 0;
-    if (Number.isNaN(parsedBalance)) return "Initial balance must be a valid number.";
+    if (Number.isNaN(parsedBalance)) return "Balance must be a valid number.";
     return null;
   }
 
@@ -296,6 +330,7 @@ export default function AccountsPage() {
     const validationError = validateForm();
     if (validationError) {
       setSubmitError(validationError);
+      toast("error", validationError);
       return;
     }
 
@@ -303,43 +338,75 @@ export default function AccountsPage() {
       ? Number(startingBalance.replace(/[^0-9.]/g, ""))
       : 0;
 
+    const accountCategoryDb = railDbValue(railType);
+    const typeDisplay = `${provider.trim()} · ${accountCategoryDb}`;
+
     setCreating(true);
     try {
       const supabase = getSupabaseBrowserClient();
 
-      const payload = {
+      const payloadFull = {
         name: name.trim(),
-        provider: provider.trim(),
-        account_category: accountCategory.trim(),
-        account_number: accountNumber.trim(),
+        type: typeDisplay,
         balance: parsedBalance,
-        type: provider.trim(),
+        provider: provider.trim(),
+        account_category: accountCategoryDb,
+        account_number: accountNumber.trim(),
       };
 
-      const { error } = await supabase.from("banking_accounts").insert(payload);
+      const inserted = await supabase.from("banking_accounts").insert(payloadFull).select("id").maybeSingle();
 
-      if (error) {
-        const { error: legacyError } = await supabase.from("banking_accounts").insert({
-          name: name.trim(),
-          type: `${provider.trim()} · ${accountCategory.trim()}`,
-          balance: parsedBalance,
-        });
-        if (legacyError) throw legacyError;
+      if (inserted.error) {
+        const minimal = await supabase
+          .from("banking_accounts")
+          .insert({
+            name: name.trim(),
+            type: typeDisplay,
+            balance: parsedBalance,
+          })
+          .select("id")
+          .single();
+
+        if (minimal.error) {
+          const msg = formatSupabaseUserMessage(minimal.error.message || "Could not save account.");
+          setSubmitError(msg);
+          toast("error", msg);
+          return;
+        }
+
+        const rowId = minimal.data.id;
+        const { error: patchErr } = await supabase
+          .from("banking_accounts")
+          .update({
+            provider: provider.trim(),
+            account_category: accountCategoryDb,
+            account_number: accountNumber.trim(),
+          })
+          .eq("id", rowId);
+
+        if (patchErr) {
+          const ignorable =
+            /column|does not exist|schema cache|could not find/i.test(patchErr.message || "");
+          if (!ignorable) {
+            const msg = formatSupabaseUserMessage(patchErr.message);
+            toast("error", msg);
+          }
+        }
       }
 
       setName("");
       setProvider(DEFAULT_PROVIDER);
-      setAccountCategory(DEFAULT_CATEGORY);
+      setRailType(DEFAULT_RAIL);
       setAccountNumber("");
       setStartingBalance("");
-      setAddOpen(false);
+      setAddPanelOpen(false);
+      setSubmitError(null);
       await loadAccounts();
     } catch (error) {
-      const msg =
-        error instanceof Error
-          ? error.message
-          : "We couldn’t add this account. Check your connection and try again.";
+      const raw = error instanceof Error ? error.message : "We couldn’t add this account.";
+      const msg = formatSupabaseUserMessage(raw);
       setSubmitError(msg);
+      toast("error", msg);
     } finally {
       setCreating(false);
     }
@@ -378,7 +445,7 @@ export default function AccountsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-200/90">
-                    Global balance
+                    Total liquid assets
                   </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums tracking-tight text-white sm:text-[2rem]">
                     ${totalLiquidAssets.toLocaleString(undefined, {
@@ -408,15 +475,130 @@ export default function AccountsPage() {
               type="button"
               onClick={() => {
                 setSubmitError(null);
-                setAddOpen(true);
+                setAddPanelOpen((o) => !o);
               }}
-              className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800"
+              className="inline-flex items-center justify-center rounded-xl bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800"
             >
-              Add account
+              {addPanelOpen ? "Close" : "Add account"}
             </button>
             <BackButton className="px-3 py-2" />
           </div>
         </div>
+
+        {addPanelOpen ? (
+          <section
+            className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5"
+            aria-labelledby={addFormTitleId}
+          >
+            <div className="mb-4 border-b border-slate-100 pb-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">GARASHO</p>
+              <h2 id={addFormTitleId} className="mt-1 text-base font-semibold text-[#0f172a]">
+                Add account
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Name, provider, rail type, reference, and opening balance — saved to Supabase with automatic
+                liquidity refresh.
+              </p>
+            </div>
+            <form onSubmit={handleAddAccount} className="space-y-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-end xl:gap-4">
+                <div className="min-w-[min(100%,12rem)] flex-1">
+                  <label className="block text-[11px] font-medium text-slate-600">Account name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    autoComplete="off"
+                    placeholder="e.g. Main operating wallet"
+                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+                  />
+                </div>
+                <div className="min-w-[min(100%,10rem)] flex-1">
+                  <label className="block text-[11px] font-medium text-slate-600">Provider</label>
+                  <select
+                    value={provider}
+                    onChange={(e) => setProvider(e.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+                  >
+                    {PROVIDERS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[min(100%,10rem)] flex-1">
+                  <label className="block text-[11px] font-medium text-slate-600">Type</label>
+                  <select
+                    value={railType}
+                    onChange={(e) => setRailType(e.target.value as RailUi)}
+                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+                  >
+                    {RAIL_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[min(100%,11rem)] flex-1">
+                  <label className="block text-[11px] font-medium text-slate-600">Account number</label>
+                  <input
+                    type="text"
+                    value={accountNumber}
+                    onChange={(e) => setAccountNumber(e.target.value)}
+                    autoComplete="off"
+                    placeholder="MSISDN, IBAN, or ref."
+                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+                  />
+                </div>
+                <div className="min-w-[min(100%,8rem)] flex-1">
+                  <label className="block text-[11px] font-medium text-slate-600">Balance</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={startingBalance}
+                    onChange={(e) => setStartingBalance(e.target.value)}
+                    placeholder="0"
+                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+                  />
+                </div>
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end xl:w-auto xl:flex-initial xl:pb-0.5">
+                  <button
+                    type="button"
+                    disabled={creating}
+                    onClick={() => {
+                      setSubmitError(null);
+                      setAddPanelOpen(false);
+                    }}
+                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-md hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {creating ? (
+                      <>
+                        <Spinner className="h-4 w-4 text-white" />
+                        Saving…
+                      </>
+                    ) : (
+                      "Save account"
+                    )}
+                  </button>
+                </div>
+              </div>
+              {submitError && addPanelOpen ? (
+                <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800 ring-1 ring-rose-100" role="alert">
+                  {submitError}
+                </p>
+              ) : null}
+            </form>
+          </section>
+        ) : null}
 
         {loading ? (
           <div className="flex justify-center rounded-2xl border border-slate-200/80 bg-white/80 py-20">
@@ -441,7 +623,7 @@ export default function AccountsPage() {
                   ? (account.type || "").split("·")[0]!.trim()
                   : account.type) ||
                 "—";
-              const theme = walletThemeFromProvider(displayProvider, resolveDisplayCategory(account));
+              const theme = cardGradientTheme(account, displayProvider);
               return (
                 <li key={account.id}>
                   <article
@@ -449,12 +631,12 @@ export default function AccountsPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className={`rounded-full p-2 ${theme.chip} ring-1`}>
-                        <CardIcon kind={railIconForProviderLabel(displayProvider)} />
+                        <CardIcon kind={cardIconKind(account, displayProvider)} />
                       </div>
                       <span
                         className={`max-w-[55%] truncate rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1 ${theme.chip}`}
                       >
-                        {resolveDisplayCategory(account) || "Account"}
+                        {chipLabelForAccount(account)}
                       </span>
                     </div>
                     <h3 className="mt-5 text-lg font-semibold leading-snug tracking-tight">
@@ -470,7 +652,7 @@ export default function AccountsPage() {
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55">
                         Balance
                       </p>
-                      <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
+                      <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight sm:text-4xl">
                         ${account.balance.toLocaleString(undefined, {
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 2,
@@ -484,152 +666,12 @@ export default function AccountsPage() {
           </ul>
         )}
 
-        {submitError && !addOpen ? (
+        {submitError && !addPanelOpen ? (
           <p className="text-center text-sm text-rose-600" role="alert">
             {submitError}
           </p>
         ) : null}
       </div>
-
-      {addOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-[2px] sm:items-center"
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !creating) setAddOpen(false);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={modalTitleId}
-            className="max-h-[min(90vh,720px)] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl sm:p-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
-                  GARASHO
-                </p>
-                <h2 id={modalTitleId} className="mt-1 text-xl font-semibold text-slate-900">
-                  Add account
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Capture provider, rail type, and masked reference for your ledger.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={creating}
-                onClick={() => setAddOpen(false)}
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
-                aria-label="Close"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path d="M6 6l12 12M18 6L6 18" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-
-            <form onSubmit={handleAddAccount} className="mt-6 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Account name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  autoComplete="off"
-                  placeholder="e.g. Main operating wallet"
-                  className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none ring-sky-200/60 focus:bg-white focus:ring-2"
-                />
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700">Provider name</label>
-                  <select
-                    value={provider}
-                    onChange={(e) => setProvider(e.target.value)}
-                    className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none ring-sky-200/60 focus:bg-white focus:ring-2"
-                  >
-                    {PROVIDERS.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700">Type</label>
-                  <select
-                    value={accountCategory}
-                    onChange={(e) => setAccountCategory(e.target.value)}
-                    className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none ring-sky-200/60 focus:bg-white focus:ring-2"
-                  >
-                    {ACCOUNT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Account number</label>
-                <input
-                  type="text"
-                  value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
-                  autoComplete="off"
-                  placeholder="MSISDN, IBAN, or card reference"
-                  className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none ring-sky-200/60 focus:bg-white focus:ring-2"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Initial balance</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={startingBalance}
-                  onChange={(e) => setStartingBalance(e.target.value)}
-                  placeholder="0"
-                  className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none ring-sky-200/60 focus:bg-white focus:ring-2"
-                />
-              </div>
-
-              {submitError ? (
-                <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-100" role="alert">
-                  {submitError}
-                </p>
-              ) : null}
-
-              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  disabled={creating}
-                  onClick={() => setAddOpen(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-md hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {creating ? (
-                    <>
-                      <Spinner className="h-4 w-4 text-white" />
-                      Saving…
-                    </>
-                  ) : (
-                    "Add account"
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
