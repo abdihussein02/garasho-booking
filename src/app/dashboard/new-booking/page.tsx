@@ -7,7 +7,7 @@ export default function DashboardNewBookingPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/bookings/new");
+    router.replace("/dashboard/tickets");
   }, [router]);
 
   return null;

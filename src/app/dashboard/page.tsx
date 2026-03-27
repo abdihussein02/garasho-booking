@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
+import { useToast } from "@/components/providers/ToastProvider";
+import { readAgencyBrandingFromStorage } from "@/lib/agencyBranding";
+import { formatConfirmationCode } from "@/lib/bookingConfirmation";
 import { fetchBookingsWithOptionalTripJoin } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -49,17 +53,19 @@ function passportExpiringWithinSixMonths(iso: string | null | undefined): boolea
   return exp >= now && exp <= horizon;
 }
 
-const navLink =
-  "flex items-center rounded-lg px-3 py-2 text-slate-700 transition hover:bg-slate-100";
-const navLinkActive =
-  "flex items-center justify-between rounded-lg bg-[#0f172a]/5 px-3 py-2 font-medium text-[#0f172a] ring-1 ring-[#0f172a]/10";
-
 export default function DashboardPage() {
+  const { toast } = useToast();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [totalLiquidity, setTotalLiquidity] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [agentName, setAgentName] = useState("Agent");
+  const [agencyLabel, setAgencyLabel] = useState("");
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setAgencyLabel(readAgencyBrandingFromStorage().name);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -109,19 +115,14 @@ export default function DashboardPage() {
           setTotalLiquidity(null);
         }
       } catch (e) {
-        console.error(e);
+        const msg = e instanceof Error ? e.message : "Could not load dashboard data.";
+        toast("error", msg.length > 120 ? `${msg.slice(0, 117)}…` : msg);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [router]);
-
-  async function handleLogout() {
-    const supabase = getSupabaseBrowserClient();
-    await supabase.auth.signOut();
-    router.replace("/auth");
-  }
+  }, [router, toast]);
 
   function getDestination(booking: Booking) {
     return booking.destination_city || booking.destination || "-";
@@ -185,41 +186,7 @@ export default function DashboardPage() {
 
   return (
     <main className="flex min-h-screen bg-slate-100/80">
-      <aside className="hidden w-64 flex-col border-r border-slate-200/90 bg-white p-6 shadow-sm sm:flex">
-        <div className="mb-8">
-          <p className="text-sm font-extrabold uppercase tracking-[0.22em] text-[#0f172a]">
-            GARASHO
-          </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-slate-500">
-            Prime Time
-          </p>
-          <p className="mt-2 text-sm font-semibold text-slate-900">Agency OS</p>
-        </div>
-        <nav className="space-y-1 text-sm">
-          <Link href="/dashboard" className={navLinkActive}>
-            Overview
-            <span className="rounded-full bg-[#0f172a]/10 px-2 text-[10px] font-semibold text-[#0f172a]">
-              CRM
-            </span>
-          </Link>
-          <Link href="/bookings/new" className={navLink}>
-            New booking
-          </Link>
-          <Link href="/settings" className={navLink}>
-            Settings
-          </Link>
-          <Link href="/dashboard/accounts" className={navLink}>
-            Banking
-          </Link>
-        </nav>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="mt-auto inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
-        >
-          Logout
-        </button>
-      </aside>
+      <AgencySidebar />
 
       <section className="flex-1 px-4 py-6 sm:px-8 sm:py-8">
         <header className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
@@ -228,15 +195,34 @@ export default function DashboardPage() {
               Command center
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              East African agencies — bookings, visas, and liquidity in one place.
+              {agencyLabel ? (
+                <>
+                  <span className="font-medium text-slate-800">{agencyLabel}</span> — tickets, travelers, visas,
+                  banking, and branding in one workspace.
+                </>
+              ) : (
+                <>Tickets, travelers, visas, treasury, and branding — your agency&apos;s one stop shop.</>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/bookings/new"
+              href="/dashboard/tickets"
               className="inline-flex items-center rounded-lg bg-[#0f172a] px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-slate-800"
             >
-              New booking
+              New ticket
+            </Link>
+            <Link
+              href="/dashboard/tickets/history"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              All tickets
+            </Link>
+            <Link
+              href="/dashboard/visa"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Visa
             </Link>
             <Link
               href="/settings"
@@ -250,6 +236,12 @@ export default function DashboardPage() {
             >
               Banking
             </Link>
+            <Link
+              href="/dashboard/team"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Team
+            </Link>
           </div>
         </header>
 
@@ -261,7 +253,7 @@ export default function DashboardPage() {
             Welcome back, {agentName}
           </h2>
           <p className="mt-2 text-sm text-slate-300">
-            Built for high-volume agency teams across the Horn and East Africa.
+            Record tickets, print itineraries, track visas, and reconcile deposits — without switching tools.
           </p>
         </section>
 
@@ -362,8 +354,15 @@ export default function DashboardPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
-          <div className="border-b border-slate-100 bg-slate-50/90 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Recent activity
+          <div className="border-b border-slate-100 bg-slate-50/90 px-4 py-2.5">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">Recent activity</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Click a row to edit the ticket. Search everything in{" "}
+              <Link href="/dashboard/tickets/history" className="font-medium text-[#0f172a] underline-offset-2 hover:underline">
+                All tickets
+              </Link>
+              .
+            </p>
           </div>
           <div className="divide-y divide-slate-100">
             {loading ? (
@@ -374,16 +373,17 @@ export default function DashboardPage() {
               <div className="px-4 py-10 text-center text-sm text-slate-500">
                 No bookings yet.{" "}
                 <Link
-                  href="/bookings/new"
+                  href="/dashboard/tickets"
                   className="font-medium text-[#0f172a] underline-offset-2 hover:underline"
                 >
-                  Create your first booking.
+                  Create your first ticket.
                 </Link>
               </div>
             ) : (
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <tr>
+                    <th className="px-4 py-3">Confirmation</th>
                     <th className="px-4 py-3">Traveler</th>
                     <th className="px-4 py-3">Destination</th>
                     <th className="px-4 py-3">Date</th>
@@ -394,7 +394,24 @@ export default function DashboardPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
                   {recentBookings.map((b) => (
-                    <tr key={b.id} className="hover:bg-slate-50/70">
+                    <tr
+                      key={b.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        router.push(`/dashboard/tickets?edit=${encodeURIComponent(b.id)}`)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          router.push(`/dashboard/tickets?edit=${encodeURIComponent(b.id)}`);
+                        }
+                      }}
+                      className="cursor-pointer hover:bg-slate-50/70"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-[10px] text-slate-600">
+                        {formatConfirmationCode(b.id)}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">
                         {b.traveler_name}
                       </td>
@@ -430,16 +447,20 @@ export default function DashboardPage() {
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <Link
                             href={`/dashboard/itinerary/${b.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                           >
                             Itinerary
                           </Link>
                           <Link
                             href={`/dashboard/receipt/${b.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                           >
                             Receipt

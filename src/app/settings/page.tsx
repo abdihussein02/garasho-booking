@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { BackButton } from "@/components/BackButton";
+import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import { useToast } from "@/components/providers/ToastProvider";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
@@ -10,6 +10,9 @@ import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 export default function SettingsPage() {
   const { toast } = useToast();
   const [agencyName, setAgencyName] = useState("Your Travel Agency");
+  const [agencyPhone, setAgencyPhone] = useState("");
+  const [agencyAddress, setAgencyAddress] = useState("");
+  const [agencyTagline, setAgencyTagline] = useState("Your journey, expertly arranged.");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -18,8 +21,14 @@ export default function SettingsPage() {
     if (typeof window === "undefined") return;
     const storedName = window.localStorage.getItem("agency_name");
     const storedLogo = window.localStorage.getItem("agency_logo");
+    const storedPhone = window.localStorage.getItem("agency_phone");
+    const storedAddress = window.localStorage.getItem("agency_address");
+    const storedTagline = window.localStorage.getItem("agency_tagline");
     if (storedName) setAgencyName(storedName);
     if (storedLogo) setLogoPreview(storedLogo);
+    if (storedPhone) setAgencyPhone(storedPhone);
+    if (storedAddress) setAgencyAddress(storedAddress);
+    if (storedTagline) setAgencyTagline(storedTagline);
   }, []);
 
   function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -57,12 +66,17 @@ export default function SettingsPage() {
           const shown = msg || "Could not save agency profile to the server.";
           setSubmitError(shown);
           toast("error", formatSupabaseUserMessage(shown));
+          return;
         }
       }
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem("agency_name", agencyName);
+        window.localStorage.setItem("agency_phone", agencyPhone.trim());
+        window.localStorage.setItem("agency_address", agencyAddress.trim());
+        window.localStorage.setItem("agency_tagline", agencyTagline.trim());
       }
+      toast("success", "Agency branding saved.");
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Something went wrong while saving.";
       setSubmitError(msg);
@@ -73,10 +87,17 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="flex min-h-screen bg-slate-100/80 px-4 py-6 sm:px-8 sm:py-8">
+    <main className="flex min-h-screen bg-slate-100/80">
+      <AgencySidebar />
+      <section className="flex-1 px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto w-full max-w-3xl rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm sm:p-8">
         <div className="border-b border-slate-100 pb-5">
-          <BackButton className="-ml-1 mb-4 px-2 py-1" />
+          <Link
+            href="/dashboard"
+            className="mb-4 inline-block text-xs font-medium text-slate-500 transition hover:text-[#0f172a]"
+          >
+            ← Dashboard
+          </Link>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">GARASHO</p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#0f172a] sm:text-2xl">
             Agency settings
@@ -134,6 +155,40 @@ export default function SettingsPage() {
             </p>
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Phone / WhatsApp</label>
+            <input
+              type="text"
+              value={agencyPhone}
+              onChange={(e) => setAgencyPhone(e.target.value)}
+              placeholder="+252 …"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">Shown on itineraries and receipts for travelers.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Address / location</label>
+            <textarea
+              rows={2}
+              value={agencyAddress}
+              onChange={(e) => setAgencyAddress(e.target.value)}
+              placeholder="Street, city, country"
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Tagline (optional)</label>
+            <input
+              type="text"
+              value={agencyTagline}
+              onChange={(e) => setAgencyTagline(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-1 ring-slate-200/80 focus:ring-2 focus:ring-[#0f172a]/20"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">Short line under your name on PDFs and shared itineraries.</p>
+          </div>
+
           {submitError ? (
             <p className="text-sm text-rose-600" role="alert">
               {submitError}
@@ -151,6 +206,7 @@ export default function SettingsPage() {
           </div>
         </form>
       </div>
+      </section>
     </main>
   );
 }

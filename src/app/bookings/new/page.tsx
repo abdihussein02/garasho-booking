@@ -1,12 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { BackButton } from "@/components/BackButton";
 import { useToast } from "@/components/providers/ToastProvider";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { BOOKING_UUID_RE } from "@/lib/bookingConfirmation";
+import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import jsPDF from "jspdf";
 
 function normalizeSpaces(value: string) {
@@ -147,9 +149,8 @@ type BankingAccount = {
   name: string;
   type: string;
   balance: number | null;
-  /** From `provider_name` (or legacy `provider`). */
+  /** From `provider_name` (legacy may store it elsewhere; UI derives rail from `type`). */
   provider_name?: string | null;
-  account_category?: string | null;
 };
 
 /** Stable id for the first row so server and client markup match during hydration. */
@@ -165,6 +166,73 @@ function createEmptyLayover(stableId?: string): Layover {
   };
 }
 
+type ToastFn = (variant: "error" | "success" | "info", message: string) => void;
+
+function isMissingColumnOrSchemaError(message: string) {
+  return /does not exist|schema cache|could not find.*column/i.test(message);
+}
+
+/** Prefer RPC; if the function is missing in Supabase, read–modify–write balance (current_balance or legacy balance). */
+async function applyDepositIncrement(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  accountId: string,
+  amount: number,
+  toast: ToastFn
+) {
+  const { error: rpcError } = await supabase.rpc("increment_bank_account_balance", {
+    p_account_id: accountId,
+    p_amount: amount,
+  });
+  if (!rpcError) return;
+
+  const msg = rpcError.message ?? "";
+  const fnMissing =
+    /increment_bank_account_balance/i.test(msg) &&
+    (/could not find function|schema cache|does not exist/i.test(msg));
+
+  if (!fnMissing) throw rpcError;
+
+  // Never select both columns at once — many DBs only have `current_balance` (renamed from `balance`).
+  let current = 0;
+  const selPrimary = await supabase
+    .from("banking_accounts")
+    .select("current_balance")
+    .eq("id", accountId)
+    .maybeSingle();
+
+  if (selPrimary.error && isMissingColumnOrSchemaError(selPrimary.error.message ?? "")) {
+    const selLegacy = await supabase
+      .from("banking_accounts")
+      .select("balance")
+      .eq("id", accountId)
+      .maybeSingle();
+    if (selLegacy.error) throw selLegacy.error;
+    const row = selLegacy.data as Record<string, unknown> | null;
+    current = row?.balance != null ? Number(row.balance) : 0;
+  } else if (selPrimary.error) {
+    throw selPrimary.error;
+  } else {
+    const row = selPrimary.data as Record<string, unknown> | null;
+    current = row?.current_balance != null ? Number(row.current_balance) : 0;
+  }
+
+  const next = current + amount;
+
+  let { error: upErr } = await supabase
+    .from("banking_accounts")
+    .update({ current_balance: next })
+    .eq("id", accountId);
+
+  if (upErr && isMissingColumnOrSchemaError(upErr.message ?? "")) {
+    const second = await supabase.from("banking_accounts").update({ balance: next }).eq("id", accountId);
+    upErr = second.error;
+  }
+
+  if (upErr) throw upErr;
+
+  toast("info", "Deposit applied to the selected account.");
+}
+
 const VISA_DESTINATIONS = [
   "Kenya",
   "Turkey",
@@ -177,7 +245,7 @@ const VISA_DESTINATIONS = [
 const fieldClass =
   "mt-1 block w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-1 ring-slate-200/80 transition placeholder:text-slate-400 focus:border-[#0f172a]/25 focus:ring-2 focus:ring-[#0f172a]/15";
 
-export default function NewBookingPage() {
+function NewBookingPageContent() {
   const { toast } = useToast();
   const [travelerName, setTravelerName] = useState("");
   const [travelerPhone, setTravelerPhone] = useState("");
@@ -194,6 +262,8 @@ export default function NewBookingPage() {
   const [departureCity, setDepartureCity] = useState("");
   const [destinationCity, setDestinationCity] = useState("");
   const [departureDate, setDepartureDate] = useState("");
+  const [tripType, setTripType] = useState<"one_way" | "return_trip">("one_way");
+  const [returnDate, setReturnDate] = useState("");
   const [departureTime, setDepartureTime] = useState("");
   const [arrivalTime, setArrivalTime] = useState("");
   const [includePrice, setIncludePrice] = useState(true);
@@ -208,8 +278,13 @@ export default function NewBookingPage() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
 
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const inAppShell = pathname === "/dashboard/tickets";
 
   function copyPassportToNotes() {
     const lines = [
@@ -238,7 +313,7 @@ export default function NewBookingPage() {
 
         const res = await supabase
           .from("banking_accounts")
-          .select("id, name, type, current_balance, provider, account_category, account_number")
+          .select("id, name, type, current_balance, provider_name, account_number")
           .order("name", { ascending: true });
         if (res.error) return;
         const raw = (res.data as Record<string, unknown>[]) ?? [];
@@ -249,9 +324,7 @@ export default function NewBookingPage() {
             name: String(row.name ?? ""),
             type: String(row.type ?? ""),
             balance: row.current_balance != null ? Number(row.current_balance) : null,
-            provider_name:
-              (row.provider as string | null) ?? null,
-            account_category: (row.account_category as string | null) ?? null,
+            provider_name: (row.provider_name as string | null) ?? null,
           }))
         );
       } catch {
@@ -260,6 +333,122 @@ export default function NewBookingPage() {
     }
     loadAccounts();
   }, []);
+
+  const editParam = searchParams.get("edit");
+
+  useEffect(() => {
+    if (!editParam || !BOOKING_UUID_RE.test(editParam)) {
+      setEditingBookingId(null);
+      return;
+    }
+    setEditingBookingId(editParam);
+    let cancelled = false;
+    async function loadForEdit() {
+      setLoadingEdit(true);
+      try {
+        const supabase = getSupabaseBrowserClient();
+        await supabase.auth.refreshSession().catch(() => {});
+        const { data, error } = await supabase.from("bookings").select("*").eq("id", editParam).single();
+        if (cancelled) return;
+        if (error || !data) {
+          toast("error", "Could not load this ticket for editing.");
+          router.replace("/dashboard/tickets");
+          setLoadingEdit(false);
+          return;
+        }
+        const row = data as Record<string, unknown>;
+        setTravelerName(String(row.traveler_name ?? ""));
+        setTravelerPhone(String(row.traveler_phone ?? ""));
+        const passport = String(row.passport_id_number ?? row.passport_number ?? "");
+        setPassportIdNumber(passport);
+        const iss = row.passport_issue_date;
+        const exp = row.passport_expiry_date;
+        setPassportIssueDate(iss != null ? String(iss).slice(0, 10) : "");
+        setPassportExpiryDate(exp != null ? String(exp).slice(0, 10) : "");
+        setAirlineName(String(row.airline_name ?? ""));
+        setFlightNumber(String(row.flight_number ?? ""));
+        setDepartureCity(String(row.departure_city ?? ""));
+        setDestinationCity(String(row.destination_city ?? row.destination ?? ""));
+        setDepartureDate(String(row.departure_date ?? "").slice(0, 10));
+        const rd = row.return_date as string | null | undefined;
+        if (rd) {
+          setTripType("return_trip");
+          setReturnDate(String(rd).slice(0, 10));
+        } else {
+          setTripType("one_way");
+          setReturnDate("");
+        }
+        const depT = row.departure_time as string | null;
+        const arrT = row.arrival_time as string | null;
+        setDepartureTime(depT ? formatTimeTo12h(String(depT).trim()) : "");
+        setArrivalTime(arrT ? formatTimeTo12h(String(arrT).trim()) : "");
+        setIncludePrice(Boolean(row.include_price ?? true));
+        setNetCost(row.net_cost != null ? String(row.net_cost) : "");
+        const visaEn = Boolean(row.visa_services_enabled);
+        setVisaServicesEnabled(visaEn);
+        const dest = String(row.visa_destination ?? "");
+        if (visaEn && dest) {
+          if ((VISA_DESTINATIONS as readonly string[]).includes(dest)) {
+            setVisaDestination(dest);
+            setVisaDestinationOther("");
+          } else {
+            setVisaDestination("Other");
+            setVisaDestinationOther(dest);
+          }
+        } else {
+          setVisaDestination("Kenya");
+          setVisaDestinationOther("");
+        }
+        const vf = row.visa_service_fee != null ? Number(row.visa_service_fee) : null;
+        const sp = row.selling_price != null ? Number(row.selling_price) : null;
+        if (visaEn && vf != null && !Number.isNaN(vf) && vf > 0 && sp != null) {
+          setVisaServiceFee(String(vf));
+          setSellingPrice(String(Math.max(0, sp - vf)));
+        } else {
+          setVisaServiceFee(vf != null && !Number.isNaN(vf) ? String(vf) : "");
+          setSellingPrice(sp != null ? String(sp) : "");
+        }
+        setVisaStatus(String(row.visa_status ?? "Pending"));
+        setNotes(String(row.notes ?? ""));
+        setPaymentMethod(String(row.payment_method ?? "Cash"));
+        const depId = row.deposit_to_id ?? row.deposit_account_id;
+        setDepositAccountId(depId != null ? String(depId) : "");
+
+        const { data: lo } = await supabase
+          .from("booking_layovers")
+          .select("id, city, airport, departure_time, arrival_time")
+          .eq("booking_id", editParam);
+        if (!cancelled && lo && lo.length > 0) {
+          setLayovers(
+            (lo as Record<string, unknown>[]).map((L) => ({
+              id: String(L.id ?? crypto.randomUUID()),
+              city: String(L.city ?? ""),
+              airport: String(L.airport ?? ""),
+              departure_time: L.departure_time
+                ? formatTimeTo12h(String(L.departure_time).trim())
+                : "",
+              arrival_time: L.arrival_time
+                ? formatTimeTo12h(String(L.arrival_time).trim())
+                : "",
+            }))
+          );
+        } else if (!cancelled) {
+          setLayovers([createEmptyLayover(INITIAL_LAYOVER_ROW_ID)]);
+        }
+      } catch {
+        if (!cancelled) {
+          toast("error", "Could not load ticket.");
+          router.replace("/dashboard/tickets");
+        }
+      } finally {
+        if (!cancelled) setLoadingEdit(false);
+      }
+    }
+    void loadForEdit();
+    return () => {
+      cancelled = true;
+    };
+  }, [editParam, router, toast]);
 
   function addLayoverRow() {
     setLayovers((prev) => [...prev, createEmptyLayover()]);
@@ -320,6 +509,15 @@ export default function NewBookingPage() {
         }
       }
 
+      if (tripType === "return_trip") {
+        if (!returnDate.trim()) {
+          throw new Error("Choose a return date for return-trip tickets.");
+        }
+        if (departureDate && returnDate.trim() < departureDate) {
+          throw new Error("Return date must be on or after the departure date.");
+        }
+      }
+
       const tripSelling = parsedSellingPrice ?? 0;
       const visaAmount = visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : 0;
       const totalSellingPrice = tripSelling + visaAmount;
@@ -328,6 +526,11 @@ export default function NewBookingPage() {
       // Try inserting with the newer flight info fields first.
       const depositFk = depositAccountId || null;
       const passportNum = passportIdNumber.trim() || null;
+
+      const returnDatePayload =
+        tripType === "return_trip" && returnDate.trim()
+          ? { return_date: returnDate.trim() }
+          : {};
 
       const bookingPayloadBase = {
         traveler_name: travelerName,
@@ -352,6 +555,7 @@ export default function NewBookingPage() {
         visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
         visa_status: visaServicesEnabled ? visaStatus : null,
         notes,
+        ...returnDatePayload,
       };
 
       const bookingPayload = {
@@ -359,11 +563,87 @@ export default function NewBookingPage() {
         deposit_to_id: depositFk,
       };
 
-      const insertPrimary = await supabase
-        .from("bookings")
-        .insert(bookingPayload)
-        .select("id")
-        .single();
+      async function updateBookingRow(bid: string, payload: Record<string, unknown>) {
+        let res = await supabase.from("bookings").update(payload).eq("id", bid).select("id").single();
+        for (const col of ["notes", "return_date"] as const) {
+          if (!res.error) break;
+          const msg = res.error?.message ?? "";
+          const missingCol =
+            (/schema cache/i.test(msg) || /could not find/i.test(msg)) &&
+            new RegExp(`['"]?${col}['"]?`, "i").test(msg);
+          if (!missingCol || !(col in payload)) continue;
+          const { [col]: _omit, ...rest } = payload;
+          res = await supabase.from("bookings").update(rest).eq("id", bid).select("id").single();
+          payload = rest;
+        }
+        return res;
+      }
+
+      if (editingBookingId) {
+        const editPayloadBase: Record<string, unknown> = {
+          ...bookingPayloadBase,
+          ...(tripType === "one_way" ? { return_date: null } : {}),
+        };
+
+        let res = await updateBookingRow(editingBookingId, {
+          ...editPayloadBase,
+          deposit_to_id: depositFk,
+        });
+        if (res.error) {
+          res = await updateBookingRow(editingBookingId, {
+            ...editPayloadBase,
+            deposit_account_id: depositFk,
+          });
+        }
+        if (res.error) {
+          res = await updateBookingRow(editingBookingId, editPayloadBase);
+        }
+        if (res.error) throw res.error;
+
+        const bookingId = editingBookingId;
+
+        await supabase.from("booking_layovers").delete().eq("booking_id", bookingId);
+
+        const filteredLayoversEdit = layovers.filter(
+          (l) => l.city || l.airport || l.departure_time || l.arrival_time
+        );
+
+        if (filteredLayoversEdit.length > 0) {
+          const layoverRows = filteredLayoversEdit.map((l) => ({
+            booking_id: bookingId,
+            city: l.city,
+            airport: l.airport,
+            departure_time: parseTimeTo24h(l.departure_time) ?? l.departure_time,
+            arrival_time: parseTimeTo24h(l.arrival_time) ?? l.arrival_time,
+          }));
+
+          const { error: layoverError } = await supabase.from("booking_layovers").insert(layoverRows);
+
+          if (layoverError) throw layoverError;
+        }
+
+        router.push(`/dashboard/tickets/${bookingId}?saved=1`);
+      } else {
+      /**
+       * Retry without optional columns missing from the remote `bookings` table (PostgREST schema cache).
+       */
+      async function insertBookingRow(payload: Record<string, unknown>) {
+        let res = await supabase.from("bookings").insert(payload).select("id").single();
+        for (const col of ["notes", "return_date"] as const) {
+          if (!res.error) break;
+          const msg = res.error?.message ?? "";
+          const missingCol =
+            (/schema cache/i.test(msg) || /could not find/i.test(msg)) &&
+            new RegExp(`['"]?${col}['"]?`, "i").test(msg);
+          if (!missingCol || !(col in payload)) continue;
+          const { [col]: _omit, ...rest } = payload;
+          res = await supabase.from("bookings").insert(rest).select("id").single();
+          payload = rest;
+        }
+        return res;
+      }
+
+      const insertPrimary = await insertBookingRow(bookingPayload);
 
       let booking = insertPrimary.data;
       let error = insertPrimary.error;
@@ -371,68 +651,56 @@ export default function NewBookingPage() {
       // Fallback chain: only the first insert may include `deposit_to_id`. Never retry `deposit_to_id`.
       // All fallbacks use `deposit_account_id` only (legacy FK).
       if (error) {
-        const fallbackLegacyDeposit = await supabase
-          .from("bookings")
-          .insert({
-            ...bookingPayloadBase,
-            deposit_account_id: depositFk,
-          })
-          .select("id")
-          .single();
+        const fallbackLegacyDeposit = await insertBookingRow({
+          ...bookingPayloadBase,
+          deposit_account_id: depositFk,
+        });
 
         booking = fallbackLegacyDeposit.data;
         error = fallbackLegacyDeposit.error;
       }
 
       if (error) {
-        const fallbackExtended = await supabase
-          .from("bookings")
-          .insert({
-            traveler_name: travelerName,
-            traveler_phone: travelerPhone.trim() || null,
-            passport_number: passportNum,
-            passport_id_number: passportNum,
-            passport_issue_date: passportIssueDate || null,
-            passport_expiry_date: passportExpiryDate || null,
-            destination: destinationCity,
-            departure_date: departureDate,
-            return_date: null,
-            notes,
-            departure_city: departureCity,
-            destination_city: destinationCity,
-            departure_time: dep24,
-            arrival_time: arr24,
-            airline_name: airlineName,
-            flight_number: flightNumber,
-            net_cost: parsedNetCost,
-            selling_price: sellingPriceForDb,
-            include_price: includePrice,
-            payment_method: paymentMethod,
-            deposit_account_id: depositFk,
-            visa_services_enabled: visaServicesEnabled,
-            visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
-            visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
-            visa_status: visaServicesEnabled ? visaStatus : null,
-          })
-          .select("id")
-          .single();
+        const fallbackExtended = await insertBookingRow({
+          traveler_name: travelerName,
+          traveler_phone: travelerPhone.trim() || null,
+          passport_number: passportNum,
+          passport_id_number: passportNum,
+          passport_issue_date: passportIssueDate || null,
+          passport_expiry_date: passportExpiryDate || null,
+          destination: destinationCity,
+          departure_date: departureDate,
+          ...returnDatePayload,
+          notes,
+          departure_city: departureCity,
+          destination_city: destinationCity,
+          departure_time: dep24,
+          arrival_time: arr24,
+          airline_name: airlineName,
+          flight_number: flightNumber,
+          net_cost: parsedNetCost,
+          selling_price: sellingPriceForDb,
+          include_price: includePrice,
+          payment_method: paymentMethod,
+          deposit_account_id: depositFk,
+          visa_services_enabled: visaServicesEnabled,
+          visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
+          visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
+          visa_status: visaServicesEnabled ? visaStatus : null,
+        });
 
         booking = fallbackExtended.data;
         error = fallbackExtended.error;
       }
 
       if (error) {
-        const fallbackMinimal = await supabase
-          .from("bookings")
-          .insert({
-            traveler_name: travelerName,
-            destination: destinationCity,
-            departure_date: departureDate,
-            return_date: null,
-            notes,
-          })
-          .select("id")
-          .single();
+        const fallbackMinimal = await insertBookingRow({
+          traveler_name: travelerName,
+          destination: destinationCity,
+          departure_date: departureDate,
+          ...returnDatePayload,
+          notes,
+        });
 
         booking = fallbackMinimal.data;
         error = fallbackMinimal.error;
@@ -446,14 +714,7 @@ export default function NewBookingPage() {
       }
 
       if (depositAccountId && sellingPriceForDb !== null) {
-        const { error: incrementError } = await supabase.rpc(
-          "increment_bank_account_balance",
-          {
-            p_account_id: depositAccountId,
-            p_amount: sellingPriceForDb,
-          }
-        );
-        if (incrementError) throw incrementError;
+        await applyDepositIncrement(supabase, depositAccountId, sellingPriceForDb, toast);
       }
 
       const filteredLayovers = layovers.filter(
@@ -482,7 +743,8 @@ export default function NewBookingPage() {
         if (layoverError) throw layoverError;
       }
 
-      router.push("/dashboard");
+      router.push(`/dashboard/tickets/${bookingId}?saved=1`);
+      }
     } catch (error) {
       const rawMessage =
         error instanceof Error
@@ -532,7 +794,11 @@ export default function NewBookingPage() {
     addLine("Traveler", travelerName);
     addLine("From", departureCity);
     addLine("To", destinationCity);
+    addLine("Trip", tripType === "return_trip" ? "Return trip" : "One way");
     addLine("Departure date", departureDate);
+    if (tripType === "return_trip" && returnDate.trim()) {
+      addLine("Return date", returnDate);
+    }
     addLine("Depart", formatTimeTo12h(parseTimeTo24h(departureTime) ?? departureTime));
     addLine("Arrive", formatTimeTo12h(parseTimeTo24h(arrivalTime) ?? arrivalTime));
     addLine("Airline", airlineName);
@@ -593,32 +859,53 @@ export default function NewBookingPage() {
   }
 
   return (
-    <main className="flex min-h-screen bg-slate-100/80 px-4 py-6 sm:px-8 sm:py-8">
+    <main className="flex min-h-screen bg-slate-100/80">
+      {inAppShell ? <AgencySidebar /> : null}
+      <div
+        className={
+          inAppShell
+            ? "flex-1 px-4 py-6 sm:px-8 sm:py-8"
+            : "w-full px-4 py-6 sm:px-8 sm:py-8"
+        }
+      >
       <div className="mx-auto w-full max-w-4xl rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-200/90 pb-5">
-          <BackButton className="-ml-1 px-2 py-1" />
+          {!inAppShell ? <BackButton className="-ml-1 px-2 py-1" /> : null}
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">
                 GARASHO · Prime Time
               </p>
               <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#0f172a] sm:text-2xl">
-                New booking
+                {editingBookingId ? "Edit ticket" : "Tickets"}
               </h1>
               <p className="mt-1 text-sm text-slate-600">
-                Enterprise CRM for East African agencies — flight, traveler, and visa in one flow.
+                {editingBookingId
+                  ? "Update traveler, flight, and visa details — changes are saved to this booking."
+                  : "Enterprise CRM for East African agencies — flight, traveler, and visa in one flow."}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-[#0f172a] shadow-sm hover:bg-slate-50"
-            >
-              Print itinerary (PDF)
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-[#0f172a] shadow-sm hover:bg-slate-50"
+              >
+                Download itinerary PDF
+              </button>
+              <p className="max-w-[14rem] text-right text-[10px] text-slate-500">
+                Saves a file to your computer (usually Downloads). For a paper copy, open the file and print, or use
+                your browser’s Print → Save as PDF.
+              </p>
+            </div>
           </div>
         </div>
 
+        {loadingEdit && editingBookingId ? (
+          <div className="mt-10 flex min-h-[40vh] flex-col items-center justify-center gap-2 text-sm text-slate-600">
+            <p>Loading ticket…</p>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="mt-6 space-y-8">
           <section className="rounded-2xl border border-slate-200/90 bg-slate-50/40 p-5 sm:p-6">
             <header className="border-b border-slate-200/80 pb-4">
@@ -630,6 +917,50 @@ export default function NewBookingPage() {
             </header>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <fieldset className="sm:col-span-2">
+                <legend className="block text-xs font-medium text-slate-700">Trip type</legend>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <label
+                    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                      tripType === "one_way"
+                        ? "border-[#0f172a] bg-[#0f172a]/5 text-[#0f172a] ring-1 ring-[#0f172a]/15"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="garasho-trip-type"
+                      className="sr-only"
+                      checked={tripType === "one_way"}
+                      onChange={() => {
+                        setTripType("one_way");
+                        setReturnDate("");
+                      }}
+                    />
+                    One way
+                  </label>
+                  <label
+                    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                      tripType === "return_trip"
+                        ? "border-[#0f172a] bg-[#0f172a]/5 text-[#0f172a] ring-1 ring-[#0f172a]/15"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="garasho-trip-type"
+                      className="sr-only"
+                      checked={tripType === "return_trip"}
+                      onChange={() => setTripType("return_trip")}
+                    />
+                    Return trip
+                  </label>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Return trip saves a return date (Supabase `bookings.return_date` — see migrations if missing).
+                </p>
+              </fieldset>
+
               <div>
                 <label className="block text-xs font-medium text-slate-700">Airline</label>
                 <input
@@ -687,6 +1018,25 @@ export default function NewBookingPage() {
                   className={fieldClass}
                 />
               </div>
+
+              {tripType === "return_trip" ? (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">
+                    Return date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    min={departureDate || undefined}
+                    value={returnDate}
+                    onChange={(e) => setReturnDate(e.target.value)}
+                    className={fieldClass}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Must be on or after departure.
+                  </p>
+                </div>
+              ) : null}
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -797,13 +1147,12 @@ export default function NewBookingPage() {
                         {bankingAccounts.map((account) => {
                           const providerLabel = account.provider_name?.trim() || "";
                           const category =
-                            account.account_category?.trim() ||
-                            (account.type.includes("·")
+                            account.type.includes("·")
                               ? account.type
                                   .split("·")
                                   .map((s) => s.trim())
                                   .pop() || ""
-                              : "");
+                              : "";
                           const rail =
                             [providerLabel, category].filter(Boolean).join(" · ") || account.type;
                           return (
@@ -1112,17 +1461,39 @@ export default function NewBookingPage() {
                 </Link>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || loadingEdit}
                   className="inline-flex items-center justify-center rounded-lg bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {saving ? "Saving booking..." : "Save booking"}
+                  {saving
+                    ? editingBookingId
+                      ? "Updating…"
+                      : "Saving booking…"
+                    : editingBookingId
+                      ? "Update ticket"
+                      : "Save booking"}
                 </button>
               </div>
             </div>
           </div>
         </form>
+        )}
+      </div>
       </div>
     </main>
+  );
+}
+
+export default function NewBookingPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-slate-100/80 px-4">
+          <p className="text-sm text-slate-600">Loading…</p>
+        </main>
+      }
+    >
+      <NewBookingPageContent />
+    </Suspense>
   );
 }
 

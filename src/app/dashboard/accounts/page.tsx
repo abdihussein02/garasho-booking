@@ -21,14 +21,13 @@ type Account = {
   name: string;
   type: string;
   balance: number;
-  provider: string | null;
-  account_category: string | null;
+  provider_name: string | null;
   account_number: string | null;
 };
 
 function displayProviderName(account: Account): string {
   return (
-    account.provider?.trim() ||
+    account.provider_name?.trim() ||
     ((account.type || "").includes("·")
       ? (account.type || "").split("·")[0]!.trim()
       : account.type) ||
@@ -57,8 +56,6 @@ function railIconForProviderLabel(provider: string): "cash" | "bank" | "mobile" 
 const LEGACY_CATEGORIES = ["Mobile Money", "Bank Account", "Visa/Mastercard", "Cash"] as const;
 
 function resolveDisplayCategory(account: Account): string | null {
-  const stored = account.account_category?.trim();
-  if (stored) return stored;
   const parts = (account.type || "").split("·").map((s) => s.trim());
   if (
     parts.length >= 2 &&
@@ -71,9 +68,6 @@ function resolveDisplayCategory(account: Account): string | null {
 
 /** Rail category from `type` ("Provider · Category") for card color (Bank / Mobile / Cash). */
 function resolveAccountKind(account: Account): "Bank Account" | "Mobile Money" | "Cash" | null {
-  const c = account.account_category?.trim();
-  if (c === "Bank Account" || c === "Mobile Money" || c === "Cash") return c;
-
   const fromType = resolveDisplayCategory(account);
   if (fromType === "Bank Account" || fromType === "Mobile Money" || fromType === "Cash") return fromType;
   return null;
@@ -259,6 +253,15 @@ function railDbValue(rail: RailUi): "Bank Account" | "Mobile Money" | "Cash" {
   return RAIL_OPTIONS.find((o) => o.value === rail)!.db;
 }
 
+function railUiFromType(type: string): RailUi {
+  const last = (type || "")
+    .split("·")
+    .map((s) => s.trim())
+    .pop();
+  const match = RAIL_OPTIONS.find((o) => o.db === last);
+  return match?.value ?? DEFAULT_RAIL;
+}
+
 /** Map DB row to UI account (`current_balance` → local `balance` for display). */
 function rowToAccount(row: Record<string, unknown>): Account {
   const raw = row.current_balance != null ? row.current_balance : 0;
@@ -267,8 +270,7 @@ function rowToAccount(row: Record<string, unknown>): Account {
     name: String(row.name ?? ""),
     type: String(row.type ?? "Account"),
     balance: Number(raw) || 0,
-    provider: (row.provider as string | null) ?? null,
-    account_category: (row.account_category as string | null) ?? null,
+    provider_name: (row.provider_name as string | null) ?? (row.provider as string | null) ?? null,
     account_number: (row.account_number as string | null) ?? null,
   };
 }
@@ -285,6 +287,8 @@ export default function AccountsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<"add" | "edit">("add");
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<string>(DEFAULT_PROVIDER);
@@ -297,7 +301,7 @@ export default function AccountsPage() {
     await supabase.auth.refreshSession().catch(() => {});
 
     const selectList =
-      "id, name, type, current_balance, provider, account_category, account_number";
+      "id, name, type, current_balance, provider_name, account_number";
     const runSelect = () =>
       supabase.from("banking_accounts").select(selectList).order("name", { ascending: true });
 
@@ -369,8 +373,7 @@ export default function AccountsPage() {
         name: accountName,
         type: typeDisplay,
         current_balance: parsedBalance,
-        provider: providerLabel,
-        account_category: accountCategoryDb,
+        provider_name: providerLabel,
         account_number: acctNum,
       };
 
@@ -383,8 +386,7 @@ export default function AccountsPage() {
             name: accountName,
             type: typeDisplay,
             current_balance: parsedBalance,
-            provider: providerLabel,
-            account_category: accountCategoryDb,
+            provider_name: providerLabel,
           })
           .select("id")
           .single();
@@ -400,8 +402,7 @@ export default function AccountsPage() {
         const { error: patchErr } = await supabase
           .from("banking_accounts")
           .update({
-            provider: providerLabel,
-            account_category: accountCategoryDb,
+            provider_name: providerLabel,
             account_number: acctNum,
           })
           .eq("id", rowId);
@@ -424,11 +425,140 @@ export default function AccountsPage() {
       setAccountNumber("");
       setStartingBalance("");
       setAddPanelOpen(false);
+      setPanelMode("add");
+      setEditingAccountId(null);
       setSubmitError(null);
       await loadAccounts();
       toast("success", "Account saved.");
     } catch (error) {
       const raw = error instanceof Error ? error.message : "We couldn’t add this account.";
+      const msg = formatSupabaseUserMessage(raw);
+      setSubmitError(msg);
+      toast("error", msg);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function startEditAccount(account: Account) {
+    const providerFromType = (account.type || "")
+      .split("·")
+      .map((s) => s.trim())[0] || DEFAULT_PROVIDER;
+    const providerLabel = account.provider_name?.trim() || providerFromType || DEFAULT_PROVIDER;
+
+    setPanelMode("edit");
+    setEditingAccountId(account.id);
+    setName(account.name || "");
+    setProvider(providerLabel);
+    setRailType(railUiFromType(account.type));
+    setAccountNumber(account.account_number || "");
+    setStartingBalance(String(account.balance ?? 0));
+    setSubmitError(null);
+    setAddPanelOpen(true);
+  }
+
+  async function handleUpdateAccount(e: FormEvent) {
+    e.preventDefault();
+    setSubmitError(null);
+
+    if (!editingAccountId) {
+      const msg = "No account selected for editing.";
+      setSubmitError(msg);
+      toast("error", msg);
+      return;
+    }
+
+    const validationError = validateForm();
+    if (validationError) {
+      setSubmitError(validationError);
+      toast("error", validationError);
+      return;
+    }
+
+    const parsedBalance = startingBalance.trim()
+      ? Number(startingBalance.replace(/[^0-9.]/g, ""))
+      : 0;
+
+    const accountCategoryDb = railDbValue(railType);
+    const typeDisplay = `${provider.trim()} · ${accountCategoryDb}`;
+
+    setCreating(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
+
+      const providerLabel = provider.trim();
+      const accountName = name.trim();
+      const acctNum = accountNumber.trim();
+
+      const payload = {
+        name: accountName,
+        type: typeDisplay,
+        current_balance: parsedBalance,
+        provider_name: providerLabel,
+        account_number: acctNum,
+      };
+
+      const { error } = await supabase
+        .from("banking_accounts")
+        .update(payload)
+        .eq("id", editingAccountId);
+
+      if (error) {
+        const msg = formatSupabaseUserMessage(error.message || "Could not update account.");
+        setSubmitError(msg);
+        toast("error", msg);
+        return;
+      }
+
+      setName("");
+      setProvider(DEFAULT_PROVIDER);
+      setRailType(DEFAULT_RAIL);
+      setAccountNumber("");
+      setStartingBalance("");
+      setEditingAccountId(null);
+      setPanelMode("add");
+      setAddPanelOpen(false);
+      setSubmitError(null);
+      await loadAccounts();
+      toast("success", "Account updated.");
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "We couldn’t update this account.";
+      const msg = formatSupabaseUserMessage(raw);
+      setSubmitError(msg);
+      toast("error", msg);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleDeleteAccount(accountId: string) {
+    const ok = window.confirm("Delete this account? This cannot be undone.");
+    if (!ok) return;
+
+    setCreating(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
+
+      const { error } = await supabase.from("banking_accounts").delete().eq("id", accountId);
+      if (error) {
+        const msg = formatSupabaseUserMessage(error.message || "Could not delete account.");
+        setSubmitError(msg);
+        toast("error", msg);
+        return;
+      }
+
+      if (editingAccountId === accountId) {
+        setEditingAccountId(null);
+        setPanelMode("add");
+        setAddPanelOpen(false);
+      }
+
+      await loadAccounts();
+      toast("success", "Account deleted.");
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "We couldn’t delete this account.";
       const msg = formatSupabaseUserMessage(raw);
       setSubmitError(msg);
       toast("error", msg);
@@ -500,6 +630,8 @@ export default function AccountsPage() {
               type="button"
               onClick={() => {
                 setSubmitError(null);
+                setPanelMode("add");
+                setEditingAccountId(null);
                 setAddPanelOpen((o) => !o);
               }}
               className="inline-flex items-center justify-center rounded-xl bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800"
@@ -518,14 +650,17 @@ export default function AccountsPage() {
             <div className="mb-4 border-b border-slate-100 pb-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">GARASHO</p>
               <h2 id={addFormTitleId} className="mt-1 text-base font-semibold text-[#0f172a]">
-                Add account
+                {panelMode === "add" ? "Add account" : "Edit account"}
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 Name, provider, rail type, reference, and opening balance — saved to Supabase with automatic
                 liquidity refresh.
               </p>
             </div>
-            <form onSubmit={handleAddAccount} className="space-y-4">
+            <form
+              onSubmit={panelMode === "add" ? handleAddAccount : handleUpdateAccount}
+              className="space-y-4"
+            >
               <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-end xl:gap-4">
                 <div className="min-w-[min(100%,12rem)] flex-1">
                   <label htmlFor="garasho-account-name" className="block text-[11px] font-medium text-slate-600">
@@ -598,6 +733,8 @@ export default function AccountsPage() {
                     disabled={creating}
                     onClick={() => {
                       setSubmitError(null);
+                      setPanelMode("add");
+                      setEditingAccountId(null);
                       setAddPanelOpen(false);
                     }}
                     className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -615,7 +752,7 @@ export default function AccountsPage() {
                         Saving…
                       </>
                     ) : (
-                      "Save account"
+                      panelMode === "add" ? "Save account" : "Save changes"
                     )}
                   </button>
                 </div>
@@ -653,6 +790,24 @@ export default function AccountsPage() {
                   <article
                     className={`relative flex h-full flex-col overflow-hidden rounded-2xl border bg-gradient-to-br p-6 text-white shadow-lg ${theme.border} ${theme.gradient}`}
                   >
+                    <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={creating}
+                        onClick={() => startEditAccount(account)}
+                        className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-medium text-white ring-1 ring-white/15 hover:bg-white/15 disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={creating}
+                        onClick={() => handleDeleteAccount(account.id)}
+                        className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-medium text-white ring-1 ring-white/15 hover:bg-white/15 disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
                     <div className="flex items-start justify-between gap-3">
                       <div className={`rounded-full p-2 ${theme.chip} ring-1`}>
                         <CardIcon kind={cardIconKind(account, displayProvider)} />
