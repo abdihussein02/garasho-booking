@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import { BackButton } from "@/components/BackButton";
@@ -281,6 +281,27 @@ export default function AccountActivityPage() {
   const ledgerBookingIds = new Set(ledger.map((r) => r.booking_id).filter(Boolean) as string[]);
   const inferredFromBookings = bookingRows.filter((b) => !ledgerBookingIds.has(b.id));
 
+  /** Sum of selling_price for tickets that deposit to this account (same basis as activity list). */
+  const ticketDepositsTotal = useMemo(
+    () =>
+      bookingRows.reduce((sum, r) => {
+        if (r.selling_price == null) return sum;
+        const n = Number(r.selling_price);
+        return sum + (Number.isFinite(n) ? n : 0);
+      }, 0),
+    [bookingRows]
+  );
+
+  /**
+   * Stored `current_balance` is updated when `increment_bank_account_balance` or the fallback runs at
+   * ticket save. If that step failed or tickets predate it, DB balance can stay 0 while bookings still
+   * link here — activity shows those tickets; balance should reflect them when ledger is empty.
+   */
+  const displayBalance =
+    account && ledger.length === 0 && ticketDepositsTotal > 0
+      ? Math.max(account.balance, ticketDepositsTotal)
+      : account?.balance ?? 0;
+
   return (
     <main className="flex min-h-screen bg-slate-100/80">
       <AgencySidebar />
@@ -317,8 +338,15 @@ export default function AccountActivityPage() {
               <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
                 <h2 className="text-sm font-semibold text-[#0f172a]">Current balance</h2>
                 <p className="mt-2 text-3xl font-bold tabular-nums text-[#0f172a]">
-                  {money(account.balance)}
+                  {money(displayBalance)}
                 </p>
+                {Math.abs(account.balance - displayBalance) > 0.005 ? (
+                  <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                    Stored balance in the database is {money(account.balance)}. The headline figure matches
+                    ticket deposits linked here—save account details with that total to sync the bank row, or
+                    run your Supabase migrations so the bank increment function runs when tickets are saved.
+                  </p>
+                ) : null}
               </section>
 
               <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
