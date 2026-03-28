@@ -76,6 +76,52 @@ export async function fetchBookingsForHistory(client: SupabaseClient) {
   return { data: minimal.data, error: minimal.error };
 }
 
+/**
+ * Single booking for ticket detail / edit form. Tries `*` then narrower selects so missing
+ * columns in older DBs don’t force a minimal row that drops phone, flight, times, etc.
+ */
+export async function fetchBookingByIdFlexible(client: SupabaseClient, id: string) {
+  const star = await client.from("bookings").select("*").eq("id", id).maybeSingle();
+  if (!star.error && star.data) {
+    return { data: star.data as Record<string, unknown>, error: null as null };
+  }
+
+  const wide = await client
+    .from("bookings")
+    .select(
+      "id, traveler_name, traveler_phone, passport_number, passport_id_number, passport_issue_date, passport_expiry_date, airline_name, flight_number, departure_city, destination_city, destination, departure_date, return_date, departure_time, arrival_time, notes, status, include_price, selling_price, net_cost, visa_services_enabled, visa_destination, visa_status, visa_service_fee, payment_method, deposit_to_id"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!wide.error && wide.data) {
+    return { data: wide.data as Record<string, unknown>, error: null as null };
+  }
+
+  const mid = await client
+    .from("bookings")
+    .select(
+      "id, traveler_name, traveler_phone, passport_number, airline_name, flight_number, departure_city, destination_city, destination, departure_date, return_date, departure_time, arrival_time, notes, status, include_price, selling_price, net_cost, visa_services_enabled, visa_destination, visa_status, payment_method, deposit_to_id"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!mid.error && mid.data) {
+    return { data: mid.data as Record<string, unknown>, error: null as null };
+  }
+
+  const minimal = await client
+    .from("bookings")
+    .select(
+      "id, traveler_name, destination, destination_city, departure_city, departure_date, departure_time, arrival_time, notes, status, selling_price, airline_name, flight_number, traveler_phone, passport_number"
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  return {
+    data: minimal.data as Record<string, unknown> | null,
+    error: minimal.error,
+  };
+}
+
 export function formatSupabaseUserMessage(raw: string): string {
   const m = raw.trim();
   if (!m) return "Something went wrong. Please try again.";

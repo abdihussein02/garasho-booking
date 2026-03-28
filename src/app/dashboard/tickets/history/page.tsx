@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import { useToast } from "@/components/providers/ToastProvider";
 import { bookingMatchesTicketSearch, formatConfirmationCode } from "@/lib/bookingConfirmation";
+import { deleteBookingById } from "@/lib/bookingDelete";
+import { formatIsoDateDisplay } from "@/lib/dateFormats";
 import { fetchBookingsForHistory, formatSupabaseUserMessage } from "@/lib/bookingsQuery";
+import { getSupabaseErrorMessage } from "@/lib/supabaseErrors";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -45,6 +48,7 @@ export default function TicketHistoryPage() {
   const { toast } = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   useEffect(() => {
@@ -101,6 +105,29 @@ export default function TicketHistoryPage() {
 
   function dest(r: Row) {
     return r.destination_city || r.destination || "—";
+  }
+
+  async function handleDeleteTicket(id: string) {
+    const label = formatConfirmationCode(id);
+    const ok = window.confirm(
+      `Delete ticket ${label}? This cannot be undone. If a deposit was recorded to a banking account for this ticket, that amount will be reversed on that account.`
+    );
+    if (!ok) return;
+
+    setDeletingId(id);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
+      await deleteBookingById(supabase, id, toast);
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      toast("success", "Ticket deleted.");
+    } catch (e) {
+      const raw = getSupabaseErrorMessage(e);
+      const msg = raw || "Could not delete ticket.";
+      toast("error", formatSupabaseUserMessage(msg));
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -170,7 +197,7 @@ export default function TicketHistoryPage() {
                     <th className="px-4 py-3">Passport / ID</th>
                     <th className="px-4 py-3">Destination</th>
                     <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3"> </th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -187,15 +214,25 @@ export default function TicketHistoryPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-700">{dest(r)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {r.departure_date || "—"}
+                        {formatIsoDateDisplay(r.departure_date)}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <Link
-                          href={`/dashboard/tickets/${r.id}`}
-                          className="font-medium text-[#0f172a] underline-offset-2 hover:underline"
-                        >
-                          Open
-                        </Link>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Link
+                            href={`/dashboard/tickets/${r.id}`}
+                            className="font-medium text-[#0f172a] underline-offset-2 hover:underline"
+                          >
+                            Open
+                          </Link>
+                          <button
+                            type="button"
+                            disabled={deletingId === r.id}
+                            onClick={() => void handleDeleteTicket(r.id)}
+                            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-800 hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            {deletingId === r.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -10,7 +10,11 @@ import {
   resolveBookingUuid,
   segmentIdFromParams,
 } from "@/lib/bookingConfirmation";
-import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
+import { formatTimeForItinerary } from "@/lib/agencyBranding";
+import { deleteBookingById } from "@/lib/bookingDelete";
+import { getSupabaseErrorMessage } from "@/lib/supabaseErrors";
+import { fetchBookingByIdFlexible, formatSupabaseUserMessage } from "@/lib/bookingsQuery";
+import { formatDateTimeDisplay, formatIsoDateDisplay } from "@/lib/dateFormats";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -36,9 +40,43 @@ type Ticket = {
   visa_services_enabled: boolean | null;
   visa_destination: string | null;
   visa_status: string | null;
+  /** When the row was created (migration `20250331220000_bookings_timestamps`). */
+  created_at?: string | null;
+  /** Last update (any field, including visa). */
+  updated_at?: string | null;
 };
 
 const STATUS_OPTIONS = ["upcoming", "completed", "cancelled"] as const;
+
+function ticketFromRow(row: Record<string, unknown>): Ticket {
+  const destMerged =
+    (row.destination_city as string | null) ?? (row.destination as string | null) ?? null;
+  return {
+    id: String(row.id),
+    traveler_name: (row.traveler_name as string | null) ?? null,
+    traveler_phone: (row.traveler_phone as string | null) ?? null,
+    passport_number: (row.passport_number as string | null) ?? null,
+    passport_id_number: (row.passport_id_number as string | null) ?? null,
+    airline_name: (row.airline_name as string | null) ?? null,
+    flight_number: (row.flight_number as string | null) ?? null,
+    departure_city: (row.departure_city as string | null) ?? null,
+    destination_city: destMerged,
+    departure_date: (row.departure_date as string | null) ?? null,
+    return_date: (row.return_date as string | null) ?? null,
+    departure_time: (row.departure_time as string | null) ?? null,
+    arrival_time: (row.arrival_time as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+    status: (row.status as string | null) ?? "upcoming",
+    include_price: (row.include_price as boolean | null) ?? null,
+    selling_price: row.selling_price != null ? Number(row.selling_price) : null,
+    net_cost: row.net_cost != null ? Number(row.net_cost) : null,
+    visa_services_enabled: (row.visa_services_enabled as boolean | null) ?? null,
+    visa_destination: (row.visa_destination as string | null) ?? null,
+    visa_status: (row.visa_status as string | null) ?? null,
+    created_at: row.created_at != null ? String(row.created_at) : null,
+    updated_at: row.updated_at != null ? String(row.updated_at) : null,
+  };
+}
 
 function TicketDetailContent() {
   const params = useParams<{ id: string }>();
@@ -49,6 +87,7 @@ function TicketDetailContent() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [status, setStatus] = useState<string>("upcoming");
   const [notes, setNotes] = useState("");
@@ -92,58 +131,14 @@ function TicketDetailContent() {
           return;
         }
 
-        const sel =
-          "id, traveler_name, traveler_phone, passport_number, passport_id_number, airline_name, flight_number, departure_city, destination_city, departure_date, return_date, departure_time, arrival_time, notes, status, include_price, selling_price, net_cost, visa_services_enabled, visa_destination, visa_status";
+        const { data: rowData, error: fetchErr } = await fetchBookingByIdFlexible(supabase, resolvedId);
 
-        let res = await supabase.from("bookings").select(sel).eq("id", resolvedId).single();
-
-        if (res.error) {
-          res = await supabase
-            .from("bookings")
-            .select(
-              "id, traveler_name, airline_name, flight_number, departure_city, destination_city, departure_date, departure_time, arrival_time, notes, status, include_price, selling_price, net_cost, visa_services_enabled, visa_destination, visa_status"
-            )
-            .eq("id", resolvedId)
-            .single();
-        }
-
-        if (res.error) {
-          res = await supabase
-            .from("bookings")
-            .select("id, traveler_name, destination, destination_city, departure_date, notes, status, selling_price")
-            .eq("id", resolvedId)
-            .single();
-        }
-
-        if (res.error || !res.data) {
+        if (fetchErr || !rowData) {
           setTicket(null);
           return;
         }
 
-        const row = res.data as Record<string, unknown>;
-        const t: Ticket = {
-          id: String(row.id),
-          traveler_name: (row.traveler_name as string | null) ?? null,
-          traveler_phone: (row.traveler_phone as string | null) ?? null,
-          passport_number: (row.passport_number as string | null) ?? null,
-          passport_id_number: (row.passport_id_number as string | null) ?? null,
-          airline_name: (row.airline_name as string | null) ?? null,
-          flight_number: (row.flight_number as string | null) ?? null,
-          departure_city: (row.departure_city as string | null) ?? null,
-          destination_city: (row.destination_city as string | null) ?? null,
-          departure_date: (row.departure_date as string | null) ?? null,
-          return_date: (row.return_date as string | null) ?? null,
-          departure_time: (row.departure_time as string | null) ?? null,
-          arrival_time: (row.arrival_time as string | null) ?? null,
-          notes: (row.notes as string | null) ?? null,
-          status: (row.status as string | null) ?? "upcoming",
-          include_price: (row.include_price as boolean | null) ?? null,
-          selling_price: row.selling_price != null ? Number(row.selling_price) : null,
-          net_cost: row.net_cost != null ? Number(row.net_cost) : null,
-          visa_services_enabled: (row.visa_services_enabled as boolean | null) ?? null,
-          visa_destination: (row.visa_destination as string | null) ?? null,
-          visa_status: (row.visa_status as string | null) ?? null,
-        };
+        const t = ticketFromRow(rowData as Record<string, unknown>);
         setTicket(t);
         setStatus(t.status || "upcoming");
         setNotes(t.notes || "");
@@ -170,15 +165,47 @@ function TicketDetailContent() {
         .eq("id", ticket.id);
       if (error) throw error;
       toast("success", "Ticket updated.");
-      setTicket((prev) =>
-        prev ? { ...prev, status, notes: notes.trim() || null } : prev
+      const { data: freshRow, error: refetchErr } = await fetchBookingByIdFlexible(
+        supabase,
+        ticket.id
       );
+      if (!refetchErr && freshRow) {
+        setTicket(ticketFromRow(freshRow as Record<string, unknown>));
+      } else {
+        setTicket((prev) =>
+          prev ? { ...prev, status, notes: notes.trim() || null } : prev
+        );
+      }
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Could not update ticket.";
       toast("error", formatSupabaseUserMessage(msg));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeleteTicket() {
+    if (!ticket) return;
+    const conf = formatConfirmationCode(ticket.id);
+    const ok = window.confirm(
+      `Delete ticket ${conf}? This cannot be undone. If a deposit was recorded to a banking account for this ticket, that amount will be reversed on that account.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.refreshSession().catch(() => {});
+      await deleteBookingById(supabase, ticket.id, toast);
+      toast("success", "Ticket deleted.");
+      router.replace("/dashboard/tickets/history");
+    } catch (e) {
+      const raw = getSupabaseErrorMessage(e);
+      const msg = raw || "Could not delete ticket.";
+      toast("error", formatSupabaseUserMessage(msg));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -266,6 +293,14 @@ function TicketDetailContent() {
               >
                 History
               </Link>
+              <button
+                type="button"
+                disabled={deleting || saving}
+                onClick={() => void handleDeleteTicket()}
+                className="inline-flex items-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 shadow-sm hover:bg-rose-100 disabled:opacity-60"
+              >
+                {deleting ? "Deleting…" : "Delete ticket"}
+              </button>
             </div>
           </div>
 
@@ -298,12 +333,12 @@ function TicketDetailContent() {
               </div>
               <div>
                 <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Departure</dt>
-                <dd className="text-slate-900">{ticket.departure_date || "—"}</dd>
+                <dd className="text-slate-900">{formatIsoDateDisplay(ticket.departure_date)}</dd>
               </div>
               {ticket.return_date ? (
                 <div>
                   <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Return</dt>
-                  <dd className="text-slate-900">{ticket.return_date}</dd>
+                  <dd className="text-slate-900">{formatIsoDateDisplay(ticket.return_date)}</dd>
                 </div>
               ) : null}
               <div>
@@ -315,7 +350,9 @@ function TicketDetailContent() {
               <div>
                 <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Times</dt>
                 <dd className="text-slate-900">
-                  {(ticket.departure_time || "—") + " → " + (ticket.arrival_time || "—")}
+                  {formatTimeForItinerary(ticket.departure_time) +
+                    " → " +
+                    formatTimeForItinerary(ticket.arrival_time)}
                 </dd>
               </div>
               {ticket.selling_price != null ? (
@@ -333,6 +370,24 @@ function TicketDetailContent() {
                 </div>
               ) : null}
             </dl>
+
+            <div className="mt-6 rounded-xl border border-slate-100 bg-slate-50/90 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Record</p>
+              <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-[11px] text-slate-500">Added</dt>
+                  <dd className="text-slate-800">{formatDateTimeDisplay(ticket.created_at)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] text-slate-500">Last edited</dt>
+                  <dd className="text-slate-800">{formatDateTimeDisplay(ticket.updated_at)}</dd>
+                </div>
+              </dl>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                Times are when this ticket was first saved and last changed in the database (including visa
+                updates). Run the bookings timestamps migration if these show as empty.
+              </p>
+            </div>
 
             <form onSubmit={handleSaveMeta} className="mt-8 space-y-4 border-t border-slate-100 pt-6 print:hidden">
               <div>

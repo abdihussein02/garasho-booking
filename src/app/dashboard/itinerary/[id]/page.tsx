@@ -13,6 +13,7 @@ import {
   resolveBookingUuid,
   segmentIdFromParams,
 } from "@/lib/bookingConfirmation";
+import { formatIsoDateDisplay } from "@/lib/dateFormats";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useParams } from "next/navigation";
 
@@ -281,7 +282,9 @@ export default function ItineraryPage() {
                   </div>
                   <div>
                     <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Departure date</dt>
-                    <dd className="mt-1 font-medium text-slate-900">{booking.departure_date || "—"}</dd>
+                    <dd className="mt-1 font-medium text-slate-900">
+                      {formatIsoDateDisplay(booking.departure_date)}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Departure time</dt>
@@ -295,7 +298,7 @@ export default function ItineraryPage() {
                 {hasReturn ? (
                   <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-4 py-3 text-sm">
                     <span className="font-medium text-slate-700">Return date: </span>
-                    {booking.return_date}
+                    {formatIsoDateDisplay(booking.return_date)}
                   </div>
                 ) : null}
               </div>

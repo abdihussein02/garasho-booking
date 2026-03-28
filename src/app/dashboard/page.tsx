@@ -6,6 +6,7 @@ import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import { useToast } from "@/components/providers/ToastProvider";
 import { readAgencyBrandingFromStorage } from "@/lib/agencyBranding";
 import { formatConfirmationCode } from "@/lib/bookingConfirmation";
+import { formatIsoDateDisplay } from "@/lib/dateFormats";
 import { fetchBookingsWithOptionalTripJoin } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -129,7 +130,8 @@ export default function DashboardPage() {
   }
 
   function getDepartureDateDisplay(booking: Booking) {
-    return booking.departure_date || "-";
+    const d = formatIsoDateDisplay(booking.departure_date);
+    return d === "—" ? "-" : d;
   }
 
   const now = new Date();
@@ -339,7 +341,7 @@ export default function DashboardPage() {
                       {b.traveler_name}
                     </td>
                     <td className="px-4 py-2.5 text-slate-700">
-                      {b.passport_expiry_date || "—"}
+                      {formatIsoDateDisplay(b.passport_expiry_date)}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">

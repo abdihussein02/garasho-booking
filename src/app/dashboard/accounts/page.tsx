@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useId, useState } from "react";
 import { BackButton } from "@/components/BackButton";
 import { useToast } from "@/components/providers/ToastProvider";
@@ -253,15 +254,6 @@ function railDbValue(rail: RailUi): "Bank Account" | "Mobile Money" | "Cash" {
   return RAIL_OPTIONS.find((o) => o.value === rail)!.db;
 }
 
-function railUiFromType(type: string): RailUi {
-  const last = (type || "")
-    .split("·")
-    .map((s) => s.trim())
-    .pop();
-  const match = RAIL_OPTIONS.find((o) => o.db === last);
-  return match?.value ?? DEFAULT_RAIL;
-}
-
 /** Map DB row to UI account (`current_balance` → local `balance` for display). */
 function rowToAccount(row: Record<string, unknown>): Account {
   const raw = row.current_balance != null ? row.current_balance : 0;
@@ -287,8 +279,6 @@ export default function AccountsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
-  const [panelMode, setPanelMode] = useState<"add" | "edit">("add");
-  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<string>(DEFAULT_PROVIDER);
@@ -425,105 +415,11 @@ export default function AccountsPage() {
       setAccountNumber("");
       setStartingBalance("");
       setAddPanelOpen(false);
-      setPanelMode("add");
-      setEditingAccountId(null);
       setSubmitError(null);
       await loadAccounts();
       toast("success", "Account saved.");
     } catch (error) {
       const raw = error instanceof Error ? error.message : "We couldn’t add this account.";
-      const msg = formatSupabaseUserMessage(raw);
-      setSubmitError(msg);
-      toast("error", msg);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  function startEditAccount(account: Account) {
-    const providerFromType = (account.type || "")
-      .split("·")
-      .map((s) => s.trim())[0] || DEFAULT_PROVIDER;
-    const providerLabel = account.provider_name?.trim() || providerFromType || DEFAULT_PROVIDER;
-
-    setPanelMode("edit");
-    setEditingAccountId(account.id);
-    setName(account.name || "");
-    setProvider(providerLabel);
-    setRailType(railUiFromType(account.type));
-    setAccountNumber(account.account_number || "");
-    setStartingBalance(String(account.balance ?? 0));
-    setSubmitError(null);
-    setAddPanelOpen(true);
-  }
-
-  async function handleUpdateAccount(e: FormEvent) {
-    e.preventDefault();
-    setSubmitError(null);
-
-    if (!editingAccountId) {
-      const msg = "No account selected for editing.";
-      setSubmitError(msg);
-      toast("error", msg);
-      return;
-    }
-
-    const validationError = validateForm();
-    if (validationError) {
-      setSubmitError(validationError);
-      toast("error", validationError);
-      return;
-    }
-
-    const parsedBalance = startingBalance.trim()
-      ? Number(startingBalance.replace(/[^0-9.]/g, ""))
-      : 0;
-
-    const accountCategoryDb = railDbValue(railType);
-    const typeDisplay = `${provider.trim()} · ${accountCategoryDb}`;
-
-    setCreating(true);
-    try {
-      const supabase = getSupabaseBrowserClient();
-      await supabase.auth.refreshSession().catch(() => {});
-
-      const providerLabel = provider.trim();
-      const accountName = name.trim();
-      const acctNum = accountNumber.trim();
-
-      const payload = {
-        name: accountName,
-        type: typeDisplay,
-        current_balance: parsedBalance,
-        provider_name: providerLabel,
-        account_number: acctNum,
-      };
-
-      const { error } = await supabase
-        .from("banking_accounts")
-        .update(payload)
-        .eq("id", editingAccountId);
-
-      if (error) {
-        const msg = formatSupabaseUserMessage(error.message || "Could not update account.");
-        setSubmitError(msg);
-        toast("error", msg);
-        return;
-      }
-
-      setName("");
-      setProvider(DEFAULT_PROVIDER);
-      setRailType(DEFAULT_RAIL);
-      setAccountNumber("");
-      setStartingBalance("");
-      setEditingAccountId(null);
-      setPanelMode("add");
-      setAddPanelOpen(false);
-      setSubmitError(null);
-      await loadAccounts();
-      toast("success", "Account updated.");
-    } catch (error) {
-      const raw = error instanceof Error ? error.message : "We couldn’t update this account.";
       const msg = formatSupabaseUserMessage(raw);
       setSubmitError(msg);
       toast("error", msg);
@@ -547,12 +443,6 @@ export default function AccountsPage() {
         setSubmitError(msg);
         toast("error", msg);
         return;
-      }
-
-      if (editingAccountId === accountId) {
-        setEditingAccountId(null);
-        setPanelMode("add");
-        setAddPanelOpen(false);
       }
 
       await loadAccounts();
@@ -630,8 +520,6 @@ export default function AccountsPage() {
               type="button"
               onClick={() => {
                 setSubmitError(null);
-                setPanelMode("add");
-                setEditingAccountId(null);
                 setAddPanelOpen((o) => !o);
               }}
               className="inline-flex items-center justify-center rounded-xl bg-[#0f172a] px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-800"
@@ -650,17 +538,14 @@ export default function AccountsPage() {
             <div className="mb-4 border-b border-slate-100 pb-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">GARASHO</p>
               <h2 id={addFormTitleId} className="mt-1 text-base font-semibold text-[#0f172a]">
-                {panelMode === "add" ? "Add account" : "Edit account"}
+                Add account
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 Name, provider, rail type, reference, and opening balance — saved to Supabase with automatic
                 liquidity refresh.
               </p>
             </div>
-            <form
-              onSubmit={panelMode === "add" ? handleAddAccount : handleUpdateAccount}
-              className="space-y-4"
-            >
+            <form onSubmit={handleAddAccount} className="space-y-4">
               <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-end xl:gap-4">
                 <div className="min-w-[min(100%,12rem)] flex-1">
                   <label htmlFor="garasho-account-name" className="block text-[11px] font-medium text-slate-600">
@@ -733,8 +618,6 @@ export default function AccountsPage() {
                     disabled={creating}
                     onClick={() => {
                       setSubmitError(null);
-                      setPanelMode("add");
-                      setEditingAccountId(null);
                       setAddPanelOpen(false);
                     }}
                     className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -752,7 +635,7 @@ export default function AccountsPage() {
                         Saving…
                       </>
                     ) : (
-                      panelMode === "add" ? "Save account" : "Save changes"
+                      "Save account"
                     )}
                   </button>
                 </div>
@@ -791,14 +674,12 @@ export default function AccountsPage() {
                     className={`relative flex h-full flex-col overflow-hidden rounded-2xl border bg-gradient-to-br p-6 text-white shadow-lg ${theme.border} ${theme.gradient}`}
                   >
                     <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={creating}
-                        onClick={() => startEditAccount(account)}
-                        className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-medium text-white ring-1 ring-white/15 hover:bg-white/15 disabled:opacity-50"
+                      <Link
+                        href={`/dashboard/accounts/${account.id}`}
+                        className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-medium text-white ring-1 ring-white/15 hover:bg-white/15"
                       >
-                        Edit
-                      </button>
+                        Activity
+                      </Link>
                       <button
                         type="button"
                         disabled={creating}

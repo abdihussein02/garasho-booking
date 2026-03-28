@@ -1,18 +1,37 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BackButton } from "@/components/BackButton";
 import { useToast } from "@/components/providers/ToastProvider";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BOOKING_UUID_RE } from "@/lib/bookingConfirmation";
+import { formatDbTimeTo12h } from "@/lib/agencyBranding";
+import { BOOKING_UUID_RE, resolveBookingUuid } from "@/lib/bookingConfirmation";
+import { applyDepositIncrement } from "@/lib/bankingDeposit";
+import { fetchBookingByIdFlexible } from "@/lib/bookingsQuery";
+import { DateInputDdMmYyyy } from "@/components/DateInputDdMmYyyy";
 import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
+import { formatIsoDateDisplay, formatIsoDateToDdMmYyyy, isoDateFromDbValue } from "@/lib/dateFormats";
 import jsPDF from "jspdf";
 
 function normalizeSpaces(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** True when route/date exist but main flight fields are empty (e.g. legacy minimal save). */
+function bookingRowLooksMissingFlight(row: Record<string, unknown>): boolean {
+  const dest = String(row.destination_city ?? row.destination ?? "").trim();
+  const depDate = String(row.departure_date ?? "").trim();
+  const hasRoute = Boolean(dest) || Boolean(depDate);
+  const hasFlight =
+    String(row.airline_name ?? "").trim() ||
+    String(row.flight_number ?? "").trim() ||
+    String(row.departure_city ?? "").trim() ||
+    Boolean(formatDbTimeTo12h(row.departure_time)) ||
+    Boolean(formatDbTimeTo12h(row.arrival_time));
+  return hasRoute && !hasFlight;
 }
 
 function parseTimeTo24h(value: string): string | null {
@@ -166,73 +185,6 @@ function createEmptyLayover(stableId?: string): Layover {
   };
 }
 
-type ToastFn = (variant: "error" | "success" | "info", message: string) => void;
-
-function isMissingColumnOrSchemaError(message: string) {
-  return /does not exist|schema cache|could not find.*column/i.test(message);
-}
-
-/** Prefer RPC; if the function is missing in Supabase, read–modify–write balance (current_balance or legacy balance). */
-async function applyDepositIncrement(
-  supabase: ReturnType<typeof getSupabaseBrowserClient>,
-  accountId: string,
-  amount: number,
-  toast: ToastFn
-) {
-  const { error: rpcError } = await supabase.rpc("increment_bank_account_balance", {
-    p_account_id: accountId,
-    p_amount: amount,
-  });
-  if (!rpcError) return;
-
-  const msg = rpcError.message ?? "";
-  const fnMissing =
-    /increment_bank_account_balance/i.test(msg) &&
-    (/could not find function|schema cache|does not exist/i.test(msg));
-
-  if (!fnMissing) throw rpcError;
-
-  // Never select both columns at once — many DBs only have `current_balance` (renamed from `balance`).
-  let current = 0;
-  const selPrimary = await supabase
-    .from("banking_accounts")
-    .select("current_balance")
-    .eq("id", accountId)
-    .maybeSingle();
-
-  if (selPrimary.error && isMissingColumnOrSchemaError(selPrimary.error.message ?? "")) {
-    const selLegacy = await supabase
-      .from("banking_accounts")
-      .select("balance")
-      .eq("id", accountId)
-      .maybeSingle();
-    if (selLegacy.error) throw selLegacy.error;
-    const row = selLegacy.data as Record<string, unknown> | null;
-    current = row?.balance != null ? Number(row.balance) : 0;
-  } else if (selPrimary.error) {
-    throw selPrimary.error;
-  } else {
-    const row = selPrimary.data as Record<string, unknown> | null;
-    current = row?.current_balance != null ? Number(row.current_balance) : 0;
-  }
-
-  const next = current + amount;
-
-  let { error: upErr } = await supabase
-    .from("banking_accounts")
-    .update({ current_balance: next })
-    .eq("id", accountId);
-
-  if (upErr && isMissingColumnOrSchemaError(upErr.message ?? "")) {
-    const second = await supabase.from("banking_accounts").update({ balance: next }).eq("id", accountId);
-    upErr = second.error;
-  }
-
-  if (upErr) throw upErr;
-
-  toast("info", "Deposit applied to the selected account.");
-}
-
 const VISA_DESTINATIONS = [
   "Kenya",
   "Turkey",
@@ -280,6 +232,8 @@ function NewBookingPageContent() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [showPartialBookingNotice, setShowPartialBookingNotice] = useState(false);
+  const editLoadSeqRef = useRef(0);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -290,8 +244,8 @@ function NewBookingPageContent() {
     const lines = [
       travelerName.trim() && `Traveler: ${travelerName.trim()}`,
       passportIdNumber.trim() && `Passport/ID: ${passportIdNumber.trim()}`,
-      passportIssueDate && `Issued: ${passportIssueDate}`,
-      passportExpiryDate && `Expires: ${passportExpiryDate}`,
+      passportIssueDate && `Issued: ${formatIsoDateToDdMmYyyy(passportIssueDate) || passportIssueDate}`,
+      passportExpiryDate && `Expires: ${formatIsoDateToDdMmYyyy(passportExpiryDate) || passportExpiryDate}`,
     ].filter(Boolean) as string[];
     if (lines.length === 0) {
       toast("error", "Add at least one passport or ID detail first.");
@@ -337,52 +291,76 @@ function NewBookingPageContent() {
   const editParam = searchParams.get("edit");
 
   useEffect(() => {
-    if (!editParam || !BOOKING_UUID_RE.test(editParam)) {
+    const editParamRaw = editParam;
+    if (!editParamRaw) {
       setEditingBookingId(null);
+      setShowPartialBookingNotice(false);
       return;
     }
-    setEditingBookingId(editParam);
+    const editQuery = editParamRaw;
+    editLoadSeqRef.current += 1;
+    const loadSeq = editLoadSeqRef.current;
     let cancelled = false;
     async function loadForEdit() {
       setLoadingEdit(true);
       try {
         const supabase = getSupabaseBrowserClient();
         await supabase.auth.refreshSession().catch(() => {});
-        const { data, error } = await supabase.from("bookings").select("*").eq("id", editParam).single();
+
+        let bookingId = editQuery.trim();
+        if (!BOOKING_UUID_RE.test(bookingId)) {
+          const resolved = await resolveBookingUuid(supabase, bookingId);
+          if (cancelled) return;
+          if (!resolved) {
+            toast("error", "Could not find a ticket for that link or confirmation code.");
+            router.replace(pathname);
+            setEditingBookingId(null);
+            return;
+          }
+          bookingId = resolved;
+          router.replace(`${pathname}?edit=${encodeURIComponent(bookingId)}`);
+          return;
+        }
+
+        setEditingBookingId(bookingId);
+        const { data, error } = await fetchBookingByIdFlexible(supabase, bookingId);
         if (cancelled) return;
+        if (loadSeq !== editLoadSeqRef.current) return;
         if (error || !data) {
           toast("error", "Could not load this ticket for editing.");
           router.replace("/dashboard/tickets");
+          setEditingBookingId(null);
+          setShowPartialBookingNotice(false);
           setLoadingEdit(false);
           return;
         }
         const row = data as Record<string, unknown>;
+        if (cancelled) return;
+        if (loadSeq !== editLoadSeqRef.current) return;
         setTravelerName(String(row.traveler_name ?? ""));
         setTravelerPhone(String(row.traveler_phone ?? ""));
         const passport = String(row.passport_id_number ?? row.passport_number ?? "");
         setPassportIdNumber(passport);
         const iss = row.passport_issue_date;
         const exp = row.passport_expiry_date;
-        setPassportIssueDate(iss != null ? String(iss).slice(0, 10) : "");
-        setPassportExpiryDate(exp != null ? String(exp).slice(0, 10) : "");
+        setPassportIssueDate(isoDateFromDbValue(iss));
+        setPassportExpiryDate(isoDateFromDbValue(exp));
         setAirlineName(String(row.airline_name ?? ""));
         setFlightNumber(String(row.flight_number ?? ""));
         setDepartureCity(String(row.departure_city ?? ""));
         setDestinationCity(String(row.destination_city ?? row.destination ?? ""));
-        setDepartureDate(String(row.departure_date ?? "").slice(0, 10));
+        setDepartureDate(isoDateFromDbValue(row.departure_date));
         const rd = row.return_date as string | null | undefined;
         if (rd) {
           setTripType("return_trip");
-          setReturnDate(String(rd).slice(0, 10));
+          setReturnDate(isoDateFromDbValue(rd));
         } else {
           setTripType("one_way");
           setReturnDate("");
         }
-        const depT = row.departure_time as string | null;
-        const arrT = row.arrival_time as string | null;
-        setDepartureTime(depT ? formatTimeTo12h(String(depT).trim()) : "");
-        setArrivalTime(arrT ? formatTimeTo12h(String(arrT).trim()) : "");
-        setIncludePrice(Boolean(row.include_price ?? true));
+        setDepartureTime(formatDbTimeTo12h(row.departure_time));
+        setArrivalTime(formatDbTimeTo12h(row.arrival_time));
+        setIncludePrice(row.include_price != null ? Boolean(row.include_price) : true);
         setNetCost(row.net_cost != null ? String(row.net_cost) : "");
         const visaEn = Boolean(row.visa_services_enabled);
         setVisaServicesEnabled(visaEn);
@@ -417,28 +395,32 @@ function NewBookingPageContent() {
         const { data: lo } = await supabase
           .from("booking_layovers")
           .select("id, city, airport, departure_time, arrival_time")
-          .eq("booking_id", editParam);
-        if (!cancelled && lo && lo.length > 0) {
+          .eq("booking_id", bookingId);
+        if (cancelled) return;
+        if (loadSeq !== editLoadSeqRef.current) return;
+        const layoverCount = Array.isArray(lo) ? lo.length : 0;
+        if (layoverCount > 0) {
           setLayovers(
             (lo as Record<string, unknown>[]).map((L) => ({
               id: String(L.id ?? crypto.randomUUID()),
               city: String(L.city ?? ""),
               airport: String(L.airport ?? ""),
-              departure_time: L.departure_time
-                ? formatTimeTo12h(String(L.departure_time).trim())
-                : "",
-              arrival_time: L.arrival_time
-                ? formatTimeTo12h(String(L.arrival_time).trim())
-                : "",
+              departure_time: formatDbTimeTo12h(L.departure_time),
+              arrival_time: formatDbTimeTo12h(L.arrival_time),
             }))
           );
-        } else if (!cancelled) {
+        } else {
           setLayovers([createEmptyLayover(INITIAL_LAYOVER_ROW_ID)]);
         }
+        setShowPartialBookingNotice(
+          layoverCount === 0 && bookingRowLooksMissingFlight(row)
+        );
       } catch {
         if (!cancelled) {
           toast("error", "Could not load ticket.");
           router.replace("/dashboard/tickets");
+          setEditingBookingId(null);
+          setShowPartialBookingNotice(false);
         }
       } finally {
         if (!cancelled) setLoadingEdit(false);
@@ -448,7 +430,7 @@ function NewBookingPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [editParam, router, toast]);
+  }, [editParam, pathname, router, toast]);
 
   function addLayoverRow() {
     setLayovers((prev) => [...prev, createEmptyLayover()]);
@@ -509,19 +491,40 @@ function NewBookingPageContent() {
         }
       }
 
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(departureDate)) {
+        throw new Error("Enter a valid departure date (DD/MM/YYYY).");
+      }
       if (tripType === "return_trip") {
         if (!returnDate.trim()) {
           throw new Error("Choose a return date for return-trip tickets.");
         }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(returnDate)) {
+          throw new Error("Enter a valid return date (DD/MM/YYYY).");
+        }
         if (departureDate && returnDate.trim() < departureDate) {
           throw new Error("Return date must be on or after the departure date.");
         }
+      }
+      if (passportIssueDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(passportIssueDate)) {
+        throw new Error("Passport issue date must be DD/MM/YYYY or empty.");
+      }
+      if (passportExpiryDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(passportExpiryDate)) {
+        throw new Error("Passport expiry must be DD/MM/YYYY or empty.");
       }
 
       const tripSelling = parsedSellingPrice ?? 0;
       const visaAmount = visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : 0;
       const totalSellingPrice = tripSelling + visaAmount;
       const sellingPriceForDb = totalSellingPrice > 0 ? totalSellingPrice : null;
+
+      if (depositAccountId.trim()) {
+        const allowed = new Set(bankingAccounts.map((a) => a.id));
+        if (!allowed.has(depositAccountId.trim())) {
+          throw new Error(
+            "Choose a deposit account from the list, or add it under Banking first. The app never creates accounts from this form."
+          );
+        }
+      }
 
       // Try inserting with the newer flight info fields first.
       const depositFk = depositAccountId || null;
@@ -643,6 +646,7 @@ function NewBookingPageContent() {
         return res;
       }
 
+      let savedWithMinimalFallback = false;
       const insertPrimary = await insertBookingRow(bookingPayload);
 
       let booking = insertPrimary.data;
@@ -704,9 +708,17 @@ function NewBookingPageContent() {
 
         booking = fallbackMinimal.data;
         error = fallbackMinimal.error;
+        if (!error) savedWithMinimalFallback = true;
       }
 
       if (error) throw error;
+
+      if (savedWithMinimalFallback) {
+        toast(
+          "info",
+          "This ticket was saved with limited fields only (traveler, route, date, notes). Run the SQL migrations in supabase/migrations on your database so airline, times, and prices can be stored."
+        );
+      }
 
       const bookingId = booking?.id;
       if (!bookingId) {
@@ -714,7 +726,13 @@ function NewBookingPageContent() {
       }
 
       if (depositAccountId && sellingPriceForDb !== null) {
-        await applyDepositIncrement(supabase, depositAccountId, sellingPriceForDb, toast);
+        const memo = visaServicesEnabled
+          ? `Ticket sale + visa (${travelerName.trim() || "Traveler"})`
+          : `Ticket sale (${travelerName.trim() || "Traveler"})`;
+        await applyDepositIncrement(supabase, depositAccountId, sellingPriceForDb, toast, {
+          bookingId,
+          memo,
+        });
       }
 
       const filteredLayovers = layovers.filter(
@@ -795,9 +813,9 @@ function NewBookingPageContent() {
     addLine("From", departureCity);
     addLine("To", destinationCity);
     addLine("Trip", tripType === "return_trip" ? "Return trip" : "One way");
-    addLine("Departure date", departureDate);
+    addLine("Departure date", departureDate ? formatIsoDateDisplay(departureDate) : "-");
     if (tripType === "return_trip" && returnDate.trim()) {
-      addLine("Return date", returnDate);
+      addLine("Return date", formatIsoDateDisplay(returnDate));
     }
     addLine("Depart", formatTimeTo12h(parseTimeTo24h(departureTime) ?? departureTime));
     addLine("Arrive", formatTimeTo12h(parseTimeTo24h(arrivalTime) ?? arrivalTime));
@@ -907,12 +925,29 @@ function NewBookingPageContent() {
           </div>
         ) : (
         <form onSubmit={handleSubmit} className="mt-6 space-y-8">
+          {editingBookingId && showPartialBookingNotice ? (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm"
+            >
+              <p className="font-medium text-amber-950">Some flight fields are empty on purpose</p>
+              <p className="mt-1.5 leading-relaxed text-amber-900/90">
+                For this ticket, only route and date were saved in the database (often from an earlier
+                “limited” save when the project database was missing columns). The form is not hiding
+                your data—those values were never stored. Apply your project’s SQL migrations in
+                Supabase, then enter airline, flight number, cities, and times here and save again.
+              </p>
+            </div>
+          ) : null}
           <section className="rounded-2xl border border-slate-200/90 bg-slate-50/40 p-5 sm:p-6">
             <header className="border-b border-slate-200/80 pb-4">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#0f172a]">01</p>
               <h2 className="mt-1 text-base font-semibold text-[#0f172a]">Flight details</h2>
               <p className="mt-1 text-xs text-slate-600">
                 Route, schedule, commercial terms, connections, and layovers.
+              </p>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Flight dates: use <span className="font-medium">DD/MM/YYYY</span> (day first).
               </p>
             </header>
 
@@ -1006,34 +1041,28 @@ function NewBookingPageContent() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700">
-                  Departure date
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={departureDate}
-                  onChange={(e) => setDepartureDate(e.target.value)}
-                  className={fieldClass}
-                />
-              </div>
+              <DateInputDdMmYyyy
+                id="booking-departure-date"
+                label="Departure date"
+                valueIso={departureDate}
+                onChangeIso={setDepartureDate}
+                required
+                className={fieldClass}
+              />
 
               {tripType === "return_trip" ? (
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">
-                    Return date
-                  </label>
-                  <input
-                    type="date"
+                  <DateInputDdMmYyyy
+                    id="booking-return-date"
+                    label="Return date"
+                    valueIso={returnDate}
+                    onChangeIso={setReturnDate}
                     required
-                    min={departureDate || undefined}
-                    value={returnDate}
-                    onChange={(e) => setReturnDate(e.target.value)}
+                    minIso={departureDate || undefined}
                     className={fieldClass}
                   />
                   <p className="mt-1 text-[11px] text-slate-500">
-                    Must be on or after departure.
+                    Must be on or after departure (DD/MM/YYYY).
                   </p>
                 </div>
               ) : null}
@@ -1163,8 +1192,8 @@ function NewBookingPageContent() {
                         })}
                       </select>
                       <p className="mt-1 text-[11px] text-slate-500">
-                        Links this booking to a bank account in Supabase; optional if you only record
-                        payment method.
+                        Optional: which account should receive the deposit. Only accounts you added under Banking
+                        appear here—this form never creates new bank accounts.
                       </p>
                     </div>
                   </div>
@@ -1255,7 +1284,7 @@ function NewBookingPageContent() {
                 </div>
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                Times accept “h:mm AM/PM” and will be stored as 24-hour in Supabase.
+                Use 12-hour times (for example 9:30 AM).
               </p>
             </div>
           </section>
@@ -1266,6 +1295,9 @@ function NewBookingPageContent() {
               <h2 className="mt-1 text-base font-semibold text-[#0f172a]">Traveler identity</h2>
               <p className="mt-1 text-xs text-slate-600">
                 Phone and passport — CRM only; never on the customer itinerary PDF.
+              </p>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Passport issue and expiry: <span className="font-medium">DD/MM/YYYY</span>.
               </p>
             </header>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1300,24 +1332,20 @@ function NewBookingPageContent() {
                   className={fieldClass}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Passport issue date</label>
-                <input
-                  type="date"
-                  value={passportIssueDate}
-                  onChange={(e) => setPassportIssueDate(e.target.value)}
-                  className={fieldClass}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700">Passport expiry</label>
-                <input
-                  type="date"
-                  value={passportExpiryDate}
-                  onChange={(e) => setPassportExpiryDate(e.target.value)}
-                  className={fieldClass}
-                />
-              </div>
+              <DateInputDdMmYyyy
+                id="passport-issue-date"
+                label="Passport issue date"
+                valueIso={passportIssueDate}
+                onChangeIso={setPassportIssueDate}
+                className={fieldClass}
+              />
+              <DateInputDdMmYyyy
+                id="passport-expiry-date"
+                label="Passport expiry"
+                valueIso={passportExpiryDate}
+                onChangeIso={setPassportExpiryDate}
+                className={fieldClass}
+              />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-4">
               <button
@@ -1443,8 +1471,7 @@ function NewBookingPageContent() {
 
           <div className="flex flex-col justify-between gap-3 pt-2 sm:flex-row sm:items-center">
             <p className="text-[11px] text-slate-500">
-              Bookings are saved to your Supabase `bookings` and
-              `booking_layovers` tables.
+              Tickets and layovers are saved to your project database.
             </p>
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
               {submitError ? (

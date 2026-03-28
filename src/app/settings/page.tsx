@@ -4,6 +4,11 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
 import { useToast } from "@/components/providers/ToastProvider";
+import {
+  compressImageFileForAgencyLogo,
+  STORAGE_AGENCY_LOGO,
+  tryPersistAgencyLogo,
+} from "@/lib/agencyBranding";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
@@ -14,13 +19,14 @@ export default function SettingsPage() {
   const [agencyAddress, setAgencyAddress] = useState("");
   const [agencyTagline, setAgencyTagline] = useState("Your journey, expertly arranged.");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const storedName = window.localStorage.getItem("agency_name");
-    const storedLogo = window.localStorage.getItem("agency_logo");
+    const storedLogo = window.localStorage.getItem(STORAGE_AGENCY_LOGO);
     const storedPhone = window.localStorage.getItem("agency_phone");
     const storedAddress = window.localStorage.getItem("agency_address");
     const storedTagline = window.localStorage.getItem("agency_tagline");
@@ -31,19 +37,32 @@ export default function SettingsPage() {
     if (storedTagline) setAgencyTagline(storedTagline);
   }, []);
 
-  function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("error", "Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result?.toString() || null;
-      setLogoPreview(result);
-      if (typeof window !== "undefined" && result) {
-        window.localStorage.setItem("agency_logo", result);
+    setLogoUploading(true);
+    try {
+      const dataUrl = await compressImageFileForAgencyLogo(file);
+      const persisted = tryPersistAgencyLogo(dataUrl);
+      if (!persisted.ok) {
+        toast("error", formatSupabaseUserMessage(persisted.message));
+        return;
       }
-    };
-    reader.readAsDataURL(file);
+      setLogoPreview(dataUrl);
+      toast("success", "Logo saved (resized to fit browser storage).");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not process this image.";
+      toast("error", formatSupabaseUserMessage(msg));
+    } finally {
+      setLogoUploading(false);
+      e.target.value = "";
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -127,15 +146,20 @@ export default function SettingsPage() {
               <div>
                 <p className="text-xs font-medium text-slate-700">Agency logo</p>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Square PNG or JPG, at least 256×256px.
+                  PNG or JPG. Large files are resized automatically (browser storage has a size limit).
                 </p>
-                <label className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-[#0f172a]/20 hover:bg-white hover:text-[#0f172a]">
-                  <span>Upload logo</span>
+                <label
+                  className={`mt-2 inline-flex cursor-pointer items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-[#0f172a]/20 hover:bg-white hover:text-[#0f172a] ${
+                    logoUploading ? "pointer-events-none opacity-60" : ""
+                  }`}
+                >
+                  <span>{logoUploading ? "Processing…" : "Upload logo"}</span>
                   <input
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={handleLogoChange}
+                    disabled={logoUploading}
+                    onChange={(ev) => void handleLogoChange(ev)}
                   />
                 </label>
               </div>
