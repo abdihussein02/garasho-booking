@@ -21,6 +21,7 @@ export function AgencySidebar() {
     pathname !== "/dashboard/tickets/history" &&
     pathname !== "/dashboard/tickets";
   const visaActive = pathname === "/dashboard/visa" || pathname.startsWith("/dashboard/visa/");
+  const financeActive = pathname === "/dashboard/finance" || pathname.startsWith("/dashboard/finance/");
   const bankingActive =
     pathname === "/dashboard/accounts" || pathname.startsWith("/dashboard/accounts/");
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -74,6 +75,9 @@ export function AgencySidebar() {
             Treasury &amp; brand
           </p>
           <div className="space-y-1">
+            <Link href="/dashboard/finance" className={financeActive ? navLinkActive : navLink}>
+              Finance
+            </Link>
             <Link href="/dashboard/accounts" className={bankingActive ? navLinkActive : navLink}>
               Banking
             </Link>

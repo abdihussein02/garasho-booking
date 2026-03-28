@@ -7,41 +7,18 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { readAgencyBrandingFromStorage } from "@/lib/agencyBranding";
 import { formatConfirmationCode } from "@/lib/bookingConfirmation";
 import { formatIsoDateDisplay } from "@/lib/dateFormats";
-import { fetchBookingsWithOptionalTripJoin } from "@/lib/bookingsQuery";
+import {
+  fetchBookingsForFinance,
+  profitForBooking,
+  revenueForBooking,
+  sumMonthlyProfit,
+  sumMonthlyRevenue,
+  type FinanceBookingRow,
+} from "@/lib/financeBookings";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
-type Booking = {
-  id: string;
-  traveler_name: string;
-  destination: string | null;
-  destination_city: string | null;
-  departure_date: string | null;
-  selling_price: number | null;
-  net_cost: number | null;
-  include_price: boolean | null;
-  status: "upcoming" | "completed" | "cancelled";
-  passport_expiry_date?: string | null;
-  visa_services_enabled?: boolean | null;
-  visa_status?: string | null;
-};
-
-function normalizeRow(raw: Record<string, unknown>): Booking {
-  return {
-    id: String(raw.id),
-    traveler_name: String(raw.traveler_name ?? ""),
-    destination: (raw.destination as string | null) ?? null,
-    destination_city: (raw.destination_city as string | null) ?? null,
-    departure_date: (raw.departure_date as string | null) ?? null,
-    selling_price: raw.selling_price != null ? Number(raw.selling_price) : null,
-    net_cost: raw.net_cost != null ? Number(raw.net_cost) : null,
-    include_price: (raw.include_price as boolean | null) ?? null,
-    status: (raw.status ?? "upcoming") as Booking["status"],
-    passport_expiry_date: (raw.passport_expiry_date as string | null) ?? null,
-    visa_services_enabled: (raw.visa_services_enabled as boolean | null) ?? null,
-    visa_status: (raw.visa_status as string | null) ?? null,
-  };
-}
+type Booking = FinanceBookingRow;
 
 /** Passport expiry date is between today and six months from now (renewal window). */
 function passportExpiringWithinSixMonths(iso: string | null | undefined): boolean {
@@ -88,11 +65,10 @@ export default function DashboardPage() {
 
         await supabase.auth.refreshSession().catch(() => {});
 
-        const { data, error } = await fetchBookingsWithOptionalTripJoin(supabase);
+        const { data, error } = await fetchBookingsForFinance(supabase);
         if (error) throw error;
 
-        const rows = ((data as Record<string, unknown>[]) ?? []).map((r) => normalizeRow(r));
-        rows.sort((a, b) => {
+        const rows = [...data].sort((a, b) => {
           const aDate = a.departure_date;
           const bDate = b.departure_date;
           if (!aDate && !bDate) return 0;
@@ -138,15 +114,12 @@ export default function DashboardPage() {
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
-  const salesThisMonth = bookings.reduce((sum, booking) => {
-    const dateString = booking.departure_date;
-    if (!dateString || booking.selling_price === null) return sum;
-    const d = new Date(dateString);
-    if (Number.isNaN(d.getTime())) return sum;
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear
-      ? sum + booking.selling_price
-      : sum;
-  }, 0);
+  const salesThisMonth = sumMonthlyRevenue(bookings, currentYear, currentMonth);
+
+  const profitThisMonth = sumMonthlyProfit(bookings, currentYear, currentMonth);
+
+  const currentMonthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
+  const financeMonthHref = `/dashboard/finance?month=${encodeURIComponent(currentMonthKey)}`;
 
   const activeVisas = useMemo(() => {
     return bookings.filter(
@@ -164,23 +137,17 @@ export default function DashboardPage() {
   const recentBookings = bookings.slice(0, 5);
 
   const totalSellingSum = useMemo(
-    () =>
-      bookings.reduce((sum, b) => sum + (b.selling_price != null ? b.selling_price : 0), 0),
+    () => bookings.reduce((sum, b) => sum + revenueForBooking(b), 0),
     [bookings]
   );
-  /** Sum of (selling price − net cost) per booking. */
+  /** All-time profit (non-cancelled): selling − net cost. */
   const portfolioProfit = useMemo(
-    () =>
-      bookings.reduce((sum, b) => {
-        const sell = b.selling_price != null ? b.selling_price : 0;
-        const net = b.net_cost != null ? b.net_cost : 0;
-        return sum + (sell - net);
-      }, 0),
+    () => bookings.reduce((sum, b) => sum + profitForBooking(b), 0),
     [bookings]
   );
   const chartMax = Math.max(totalSellingSum, Math.abs(portfolioProfit), 1);
 
-  function getPaymentBadge(status: Booking["status"]) {
+  function getPaymentBadge(status: string) {
     if (status === "completed") return "Paid";
     if (status === "cancelled") return "Cancelled";
     return "Pending";
@@ -260,15 +227,23 @@ export default function DashboardPage() {
         </section>
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <Link
+            href={`${financeMonthHref}#revenue`}
+            className="group rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:border-sky-300/80 hover:shadow-md"
+          >
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Monthly sales
             </p>
             <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-[#0f172a]">
               ${salesThisMonth.toLocaleString()}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Trip revenue this calendar month</p>
-          </article>
+            <p className="mt-1 text-xs text-slate-500">
+              Revenue from tickets first saved this month — click for detail
+            </p>
+            <p className="mt-2 text-[11px] font-medium text-sky-700 opacity-0 transition group-hover:opacity-100">
+              Open finance report →
+            </p>
+          </Link>
           <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Active visas
@@ -278,22 +253,28 @@ export default function DashboardPage() {
             </p>
             <p className="mt-1 text-xs text-slate-500">Cases in progress (not yet approved)</p>
           </article>
-          <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+          <Link
+            href={`${financeMonthHref}#profit`}
+            className="group rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition hover:border-emerald-300/80 hover:shadow-md"
+          >
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Total profit
+              Monthly profit
             </p>
             <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-[#0f172a]">
               {loading
                 ? "—"
-                : `$${portfolioProfit.toLocaleString(undefined, {
+                : `$${profitThisMonth.toLocaleString(undefined, {
                     minimumFractionDigits: 0,
                     maximumFractionDigits: 2,
                   })}`}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Live from Supabase: selling price minus net cost, all bookings
+              Selling price − net cost for tickets saved this month — click for detail
             </p>
-          </article>
+            <p className="mt-2 text-[11px] font-medium text-emerald-800 opacity-0 transition group-hover:opacity-100">
+              Open finance report →
+            </p>
+          </Link>
           <article className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Total liquid assets
@@ -484,8 +465,12 @@ export default function DashboardPage() {
             </p>
             <p className="mt-1 text-sm font-semibold text-[#0f172a]">Portfolio snapshot</p>
             <p className="mt-1 text-xs text-slate-500">
-              Revenue is the sum of selling prices; profit matches the Total profit card (selling
-              price − net cost per booking).
+              All-time totals (non-cancelled): revenue is sum of selling prices; profit is selling price
+              minus net cost per ticket. Monthly figures are on the{" "}
+              <Link href={financeMonthHref} className="font-medium text-[#0f172a] underline-offset-2 hover:underline">
+                finance report
+              </Link>
+              .
             </p>
             <div className="mt-6 flex h-44 items-end justify-center gap-8 sm:gap-16">
               <div className="flex w-24 flex-col items-center gap-2 sm:w-32">
