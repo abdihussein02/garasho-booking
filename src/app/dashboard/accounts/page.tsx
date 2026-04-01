@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useId, useState } from "react";
 import { BackButton } from "@/components/BackButton";
 import { useToast } from "@/components/providers/ToastProvider";
+import { fetchAgencyProfile } from "@/lib/agencyProfile";
 import { formatSupabaseUserMessage } from "@/lib/bookingsQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
@@ -355,6 +356,9 @@ export default function AccountsPage() {
       const supabase = getSupabaseBrowserClient();
       await supabase.auth.refreshSession().catch(() => {});
 
+      const profile = await fetchAgencyProfile(supabase).catch(() => null);
+      const agencyId = profile?.agency_id ?? null;
+
       const providerLabel = provider.trim();
       const accountName = name.trim();
       const acctNum = accountNumber.trim();
@@ -365,6 +369,7 @@ export default function AccountsPage() {
         current_balance: parsedBalance,
         provider_name: providerLabel,
         account_number: acctNum,
+        agency_id: agencyId,
       };
 
       let inserted = await supabase.from("banking_accounts").insert(payload).select("id").maybeSingle();
@@ -377,6 +382,7 @@ export default function AccountsPage() {
             type: typeDisplay,
             current_balance: parsedBalance,
             provider_name: providerLabel,
+            agency_id: agencyId,
           })
           .select("id")
           .single();

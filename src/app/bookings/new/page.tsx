@@ -13,6 +13,7 @@ import { applyDepositIncrement } from "@/lib/bankingDeposit";
 import { fetchBookingByIdFlexible } from "@/lib/bookingsQuery";
 import { DateInputDdMmYyyy } from "@/components/DateInputDdMmYyyy";
 import { AgencySidebar } from "@/components/dashboard/AgencySidebar";
+import { fetchAgencyProfile } from "@/lib/agencyProfile";
 import { formatIsoDateDisplay, formatIsoDateToDdMmYyyy, isoDateFromDbValue } from "@/lib/dateFormats";
 import jsPDF from "jspdf";
 
@@ -541,6 +542,9 @@ function NewBookingPageContent() {
         }
       }
 
+      const profile = await fetchAgencyProfile(supabase).catch(() => null);
+      const agencyIdForBooking = profile?.agency_id ?? null;
+
       // Try inserting with the newer flight info fields first.
       const depositFk = depositAccountId || null;
       const passportNum = passportIdNumber.trim() || null;
@@ -573,6 +577,7 @@ function NewBookingPageContent() {
         visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
         visa_status: visaServicesEnabled ? visaStatus : null,
         notes,
+        agency_id: agencyIdForBooking,
         ...returnDatePayload,
       };
 
@@ -583,7 +588,7 @@ function NewBookingPageContent() {
 
       async function updateBookingRow(bid: string, payload: Record<string, unknown>) {
         let res = await supabase.from("bookings").update(payload).eq("id", bid).select("id").single();
-        for (const col of ["notes", "return_date"] as const) {
+        for (const col of ["notes", "return_date", "agency_id"] as const) {
           if (!res.error) break;
           const msg = res.error?.message ?? "";
           const missingCol =
@@ -647,7 +652,7 @@ function NewBookingPageContent() {
        */
       async function insertBookingRow(payload: Record<string, unknown>) {
         let res = await supabase.from("bookings").insert(payload).select("id").single();
-        for (const col of ["notes", "return_date"] as const) {
+        for (const col of ["notes", "return_date", "agency_id"] as const) {
           if (!res.error) break;
           const msg = res.error?.message ?? "";
           const missingCol =
@@ -706,6 +711,7 @@ function NewBookingPageContent() {
           visa_destination: visaServicesEnabled ? resolvedVisaDestination : null,
           visa_service_fee: visaServicesEnabled && parsedVisaFee !== null ? parsedVisaFee : null,
           visa_status: visaServicesEnabled ? visaStatus : null,
+          agency_id: agencyIdForBooking,
         });
 
         booking = fallbackExtended.data;
@@ -719,6 +725,7 @@ function NewBookingPageContent() {
           departure_date: departureDate,
           ...returnDatePayload,
           notes,
+          agency_id: agencyIdForBooking,
         });
 
         booking = fallbackMinimal.data;

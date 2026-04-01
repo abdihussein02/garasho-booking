@@ -26,6 +26,7 @@ export function AgencySidebar() {
     pathname === "/dashboard/accounts" || pathname.startsWith("/dashboard/accounts/");
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const teamActive = pathname === "/dashboard/team";
+  const adminAgenciesActive = pathname === "/dashboard/admin/agencies";
 
   async function handleLogout() {
     const supabase = getSupabaseBrowserClient();
@@ -93,6 +94,12 @@ export function AgencySidebar() {
           <div className="space-y-1">
             <Link href="/dashboard/team" className={teamActive ? navLinkActive : navLink}>
               Team
+            </Link>
+            <Link
+              href="/dashboard/admin/agencies"
+              className={adminAgenciesActive ? navLinkActive : navLink}
+            >
+              Agencies
             </Link>
           </div>
         </div>
