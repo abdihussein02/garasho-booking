@@ -27,3 +27,25 @@ body {
     Roboto, sans-serif;
   font-feature-settings: "ss01" on, "liga" on;
 }
+
+/*
+ * Form controls do not always inherit `body` text color consistently across browsers.
+ * Chrome/Edge on Windows and mobile Chrome often default to a lighter gray for <input>/<select>/<textarea>,
+ * while Safari on macOS can look darker — set an explicit readable color as a baseline.
+ */
+@layer base {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(:disabled),
+  textarea:not(:disabled),
+  select:not(:disabled) {
+    color: #0f172a;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus {
+    -webkit-text-fill-color: #0f172a;
+  }
+}

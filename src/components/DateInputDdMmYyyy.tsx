@@ -84,7 +84,7 @@ export function DateInputDdMmYyyy({
           onChangeIso(iso);
           setText(formatIsoDateToDdMmYyyy(iso));
         }}
-        className={className}
+        className={`text-[#0f172a] placeholder:text-slate-400 ${className}`}
       />
     </div>
   );

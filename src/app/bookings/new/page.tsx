@@ -97,6 +97,24 @@ function getTimeSuggestions(stepMinutes = 30) {
 
 const TIME_SUGGESTIONS = getTimeSuggestions(30);
 
+/** Windows/Android Chrome often use a muted UA `color` on inputs unless set explicitly; Safari tends to look darker. */
+const formControlText = "text-[#0f172a] placeholder:text-slate-400";
+
+const fieldClass =
+  `mt-1 block w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm ${formControlText} outline-none ring-1 ring-slate-200/80 transition focus:border-[#0f172a]/25 focus:ring-2 focus:ring-[#0f172a]/15`;
+
+const timeInputClass =
+  `block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs ${formControlText} outline-none ring-sky-200 focus:bg-white focus:ring-2`;
+
+const slateInputClass =
+  `mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm ${formControlText} outline-none ring-sky-200 focus:bg-white focus:ring-2`;
+
+const slateInputClassCompact =
+  `block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs ${formControlText} outline-none ring-sky-200 focus:bg-white focus:ring-2`;
+
+const whiteInputClass =
+  `mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm ${formControlText} outline-none ring-sky-200 focus:ring-2`;
+
 function TimeInput({
   id,
   value,
@@ -127,7 +145,7 @@ function TimeInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+        className={timeInputClass}
       />
     );
   }
@@ -144,7 +162,7 @@ function TimeInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+        className={timeInputClass}
       />
       <datalist id={`${id}-list`}>
         {TIME_SUGGESTIONS.map((t) => (
@@ -193,9 +211,6 @@ const VISA_DESTINATIONS = [
   "Egypt",
   "Other",
 ] as const;
-
-const fieldClass =
-  "mt-1 block w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-1 ring-slate-200/80 transition placeholder:text-slate-400 focus:border-[#0f172a]/25 focus:ring-2 focus:ring-[#0f172a]/15";
 
 function NewBookingPageContent() {
   const { toast } = useToast();
@@ -1123,7 +1138,7 @@ function NewBookingPageContent() {
                       value={netCost}
                       onChange={(e) => setNetCost(e.target.value)}
                       placeholder="e.g. 900"
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                      className={whiteInputClass}
                     />
                   </div>
                   <div>
@@ -1136,7 +1151,7 @@ function NewBookingPageContent() {
                       value={sellingPrice}
                       onChange={(e) => setSellingPrice(e.target.value)}
                       placeholder="e.g. 1250"
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                      className={whiteInputClass}
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
                       Visa service fees (below) are added to this for the recorded total and banking deposit.
@@ -1155,7 +1170,7 @@ function NewBookingPageContent() {
                       <select
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
-                        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                        className={whiteInputClass}
                       >
                         <option value="Cash">Cash</option>
                         <option value="EVC">EVC</option>
@@ -1170,7 +1185,7 @@ function NewBookingPageContent() {
                       <select
                         value={depositAccountId}
                         onChange={(e) => setDepositAccountId(e.target.value)}
-                        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-sky-200 focus:ring-2"
+                        className={whiteInputClass}
                       >
                         <option value="">No account selected</option>
                         {bankingAccounts.map((account) => {
@@ -1235,7 +1250,7 @@ function NewBookingPageContent() {
                           type="text"
                           value={l.city}
                           onChange={(e) => updateLayover(l.id, "city", e.target.value)}
-                          className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                          className={slateInputClassCompact}
                         />
                       </div>
                       <div>
@@ -1246,7 +1261,7 @@ function NewBookingPageContent() {
                           type="text"
                           value={l.airport}
                           onChange={(e) => updateLayover(l.id, "airport", e.target.value)}
-                          className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                          className={slateInputClassCompact}
                         />
                       </div>
                       <div>
@@ -1404,7 +1419,7 @@ function NewBookingPageContent() {
                     required={visaServicesEnabled}
                     value={visaDestination}
                     onChange={(e) => setVisaDestination(e.target.value)}
-                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                    className={slateInputClass}
                   >
                     <option value="">Select country</option>
                     {VISA_DESTINATIONS.map((c) => (
@@ -1423,7 +1438,7 @@ function NewBookingPageContent() {
                       value={visaDestinationOther}
                       onChange={(e) => setVisaDestinationOther(e.target.value)}
                       placeholder="Country name"
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                      className={slateInputClass}
                     />
                   </div>
                 ) : null}
@@ -1437,7 +1452,7 @@ function NewBookingPageContent() {
                     value={visaServiceFee}
                     onChange={(e) => setVisaServiceFee(e.target.value)}
                     placeholder="e.g. 150"
-                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                    className={slateInputClass}
                   />
                 </div>
                 <div>
@@ -1445,7 +1460,7 @@ function NewBookingPageContent() {
                   <select
                     value={visaStatus}
                     onChange={(e) => setVisaStatus(e.target.value)}
-                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+                    className={slateInputClass}
                   >
                     <option value="Pending">Pending</option>
                     <option value="Submitted">Submitted</option>
@@ -1464,7 +1479,7 @@ function NewBookingPageContent() {
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-sky-200 focus:bg-white focus:ring-2"
+              className={slateInputClass}
               placeholder="Visa reminders, baggage details, hotel confirmations, etc."
             />
           </div>
