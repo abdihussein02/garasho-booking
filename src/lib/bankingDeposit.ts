@@ -33,18 +33,18 @@ export async function assertDepositAccountExists(
   }
 }
 
-async function tryRecordBookingLedger(
+async function tryRecordLedgerEntry(
   supabase: SupabaseClient,
   accountId: string,
   amount: number,
-  bookingId: string,
-  memo: string
+  memo: string,
+  opts: { bookingId?: string | null; source?: string }
 ) {
   const { error } = await supabase.from("banking_account_ledger").insert({
     banking_account_id: accountId,
     amount,
-    source: "booking",
-    booking_id: bookingId,
+    source: opts.source ?? "booking",
+    booking_id: opts.bookingId ?? null,
     memo,
   });
   if (error && !isMissingLedgerTableError(error.message)) {
@@ -54,14 +54,18 @@ async function tryRecordBookingLedger(
 
 /**
  * Prefer RPC; if missing, read–modify–write balance (current_balance or legacy balance).
- * Optionally records a ledger row linked to the booking (ticket / visa totals).
+ * Optionally records a ledger row (ticket booking, standalone visa case, etc.).
  */
+export type DepositLedgerRef =
+  | { memo: string; bookingId: string; source?: "booking" }
+  | { memo: string; source: "visa_case" };
+
 export async function applyDepositIncrement(
   supabase: SupabaseClient,
   accountId: string,
   amount: number,
   toast: DepositToastFn,
-  ledger: { bookingId: string; memo: string } | null,
+  ledger: DepositLedgerRef | null,
   opts?: { silent?: boolean }
 ) {
   await assertDepositAccountExists(supabase, accountId);
@@ -73,13 +77,13 @@ export async function applyDepositIncrement(
 
   if (!rpcError) {
     if (ledger) {
-      await tryRecordBookingLedger(
-        supabase,
-        accountId,
-        amount,
-        ledger.bookingId,
-        ledger.memo
-      );
+      const source =
+        "bookingId" in ledger ? ledger.source ?? "booking" : ledger.source;
+      const bookingId = "bookingId" in ledger ? ledger.bookingId : null;
+      await tryRecordLedgerEntry(supabase, accountId, amount, ledger.memo, {
+        bookingId,
+        source,
+      });
     }
     return;
   }
@@ -129,7 +133,9 @@ export async function applyDepositIncrement(
   if (upErr) throw upErr;
 
   if (ledger) {
-    await tryRecordBookingLedger(supabase, accountId, amount, ledger.bookingId, ledger.memo);
+    const source = "bookingId" in ledger ? ledger.source ?? "booking" : ledger.source;
+    const bookingId = "bookingId" in ledger ? ledger.bookingId : null;
+    await tryRecordLedgerEntry(supabase, accountId, amount, ledger.memo, { bookingId, source });
   }
 
   if (!opts?.silent) {
